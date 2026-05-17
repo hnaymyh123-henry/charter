@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv/
+venv/
+data/
+*.pem
+.pytest_cache/
+.uv-cache/
+.uv/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+Thumbs.db
+
+# Claude Code per-user settings (MCP allowlist etc.) — personal preference,
+# do not version-control.
+.claude/settings.local.json

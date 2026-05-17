@@ -1,0 +1,54 @@
+# Bob — Backend Engineer Charter Profile
+#
+# This file is Principal Context. Only its SHA-256 commitment is written to
+# provenance.source_commitments[].content_hash; the raw content below is not
+# persisted by Charter Service.
+#
+# Consumed by: charter issue profiles/bob.yaml
+#
+# Note: agent.id is INTENTIONALLY the same as alice.yaml — same underlying
+# research_agent_v1 binds to a different principal, producing a distinct
+# Charter Instance with different scope, hours, and budget.
+
+principal:
+  id: bob@startup.io
+  role: Backend engineer at TinyDB Inc, full-stack maintenance and infra
+
+agent:
+  id: research_agent_v1
+  card_url: https://agents.example.com/research_agent_v1/card.json
+
+scope:
+  - 写代码
+  - debug
+  - 重构
+  - 写技术文档
+  - code review
+  - 技术选型调研
+
+out_of_scope:
+  - 报税
+  - 做账
+  - 营销文案
+  - 个人理财建议
+
+approval_required:
+  - 往生产环境部署
+  - DROP TABLE / 删除数据库表 / 删除生产备份
+  - 修改 IAM 权限或 access policy
+  - 给外部服务付款
+  - 提交包含 secrets 的代码
+
+data_handling:
+  what: 公司源代码、内部 API key、客户邮件列表、运营 metrics
+  rules: 不 commit 到公开仓库;不发送给第三方 LLM(包括非工作用 ChatGPT);不 dump 到日志文件
+
+operational:
+  hours: anytime
+  budget_per_task_usd: 2.00
+  budget_monthly_usd: 200.00
+
+style: 代码块先行,解释后置;英文为主;简洁,不需要客套话
+
+lifecycle:
+  valid_days: 60
