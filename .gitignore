@@ -20,3 +20,7 @@ Thumbs.db
 # Claude Code per-user settings (MCP allowlist etc.) — personal preference,
 # do not version-control.
 .claude/settings.local.json
+
+# Internal-only design notes (kept locally, not pushed to public repo).
+CONTEXT.md
+Charter-黑客松项目文档.md
