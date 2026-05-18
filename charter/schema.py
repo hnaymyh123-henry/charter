@@ -92,13 +92,19 @@ class Clause(BaseModel):
 
 
 class MatchedClause(BaseModel):
-    """One row in `Verdict.matched_clauses` — structured per §P2-11 ⑬."""
+    """One row in `Verdict.matched_clauses`.
+
+    `source_charter_id` is populated when the verdict was produced by
+    `aggregate_verdict_chain` across a Charter Chain; for the single-
+    Charter `aggregate_verdict` path it remains `None` (back-compat).
+    """
 
     id: str
     local_decision: Literal["allow", "needs_approval", "incompatible"]
     applied: bool = Field(description="True iff this clause determined the aggregate decision.")
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str
+    source_charter_id: str | None = None
 
 
 class Verdict(BaseModel):
@@ -185,6 +191,35 @@ class Provenance(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Charter Chain (parent reference + attenuation proof)
+# ---------------------------------------------------------------------------
+
+
+class AttenuationProof(BaseModel):
+    """A child Charter's declarative claim that it is a stricter subset
+    of its parent.
+
+    The protocol's `verify_chain` checks the claim against the actual
+    clauses — the proof is metadata for auditors, not a substitute for
+    verification.
+
+    Attributes:
+        parent_charter_id:
+            The `charter_id` of the parent Charter this one attenuates.
+            Must match the parent's `charter_id` resolved via
+            `parent_charter_url`; mismatch is a chain-validation failure.
+        attenuates:
+            For each child clause id, the parent clause ids it tightens
+            or inherits. Optional — used for audit traceability. Missing
+            entries do not invalidate the chain; `verify_chain` checks
+            the actual clause content.
+    """
+
+    parent_charter_id: str
+    attenuates: dict[str, list[str]] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
 # Charter (top-level)
 # ---------------------------------------------------------------------------
 
@@ -220,6 +255,12 @@ class Charter(BaseModel):
     decision_schema: DecisionSchemaDoc = Field(default_factory=DecisionSchemaDoc)
     lifecycle: Lifecycle
     provenance: Provenance
+
+    # Charter Chain fields. Both `None` for root Charters; both populated
+    # for child Charters in an attenuation chain. `verify_chain` checks
+    # the subset relation against the parent fetched via this URL.
+    parent_charter_url: str | None = None
+    attenuation_proof: AttenuationProof | None = None
 
 
 # ---------------------------------------------------------------------------

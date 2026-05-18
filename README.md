@@ -100,6 +100,51 @@ Endpoints:
 charter inspect <principal_id> <agent_id>
 ```
 
+## Deployment (fly.io)
+
+The repo ships a `Dockerfile`, a `fly.toml` template, and a GitHub
+Actions workflow (`.github/workflows/deploy.yml`) that deploys on every
+push to `main`. The pieces:
+
+1.  **One-time provisioning.** The human deployer runs locally:
+
+    ```bash
+    fly launch --copy-config --no-deploy   # claims an app name
+    fly volumes create charter_data --size 1  # persistent Charter + key store
+    ```
+
+    Then edits `fly.toml`'s `app = "..."` line to match the claimed name.
+
+2.  **Secrets.** Configure both fly and GitHub:
+
+    | Where | Name | Purpose |
+    |---|---|---|
+    | `fly secrets set` | `CHARTER_KEY_PASSPHRASE` | Encrypts issuer Ed25519 private keys at rest (v0.6). |
+    | `fly secrets set` | `ANTHROPIC_API_KEY` | Required only by `charter issue`. The server itself doesn't need it. |
+    | `fly secrets set` | `CHARTER_URL_BASE` | `https://<your-app>.fly.dev` |
+    | GitHub repo secret | `FLY_API_TOKEN` | Lets the workflow run `flyctl deploy`. |
+    | GitHub repo variable | `DEPLOY_ENABLED` | Set to `"true"` to enable the deploy workflow. Leave unset to skip deploys until you're ready. |
+
+3.  **`fly.toml` already sets** the production env vars:
+
+    ```toml
+    [env]
+      CHARTER_PORT     = "8000"
+      CHARTER_DATA_DIR = "/data"
+      CHARTER_LOG_FORMAT = "json"
+    ```
+
+4.  **Deploy.** Push to `main`. The workflow:
+    - Builds the multi-stage image.
+    - Runs `flyctl deploy --remote-only`.
+    - Smoke-checks `https://<app>.fly.dev/healthz` after the rollout
+      (retries 5 times to absorb the brief TLS-cert warmup).
+
+5.  **Roll back** with `fly releases list` + `fly deploy --image
+    <previous-tag>`. The fly health check on `/healthz` already
+    auto-rolls failed deploys before they take traffic; this is the
+    "I changed my mind" path.
+
 ## Use from a calling agent (MCP)
 
 Any MCP-capable client (Claude Code, Codex CLI, Cursor, custom agents…)

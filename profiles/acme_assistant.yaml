@@ -1,0 +1,56 @@
+# Acme Assistant — Agent-as-Principal → Research Agent Charter Profile
+#
+# The Acme assistant agent (which itself is the *agent* in
+# profiles/acme_corp.yaml) acts as a principal toward a downstream
+# research_agent_v1. This Charter is the CHILD in the chain — it must
+# be a strict subset of acme_corp's Charter.
+#
+# The chain in this demo:
+#   acme_corp (org)
+#     └─ Charter A → assistant_agent_v1
+#                      │ Charter B (this file) → research_agent_v1
+#                      │   (B must ⊆ A)
+#                      ▼
+#                    research_agent_v1
+#
+# Restrictions tightened in B vs A:
+#   - Drops "Engineering work" from scope (assistant only delegates
+#     accounting subtasks to its sub-agent).
+#   - Inherits parent's "Marketing copy" + "Cold-email campaigns"
+#     out_of_scope.
+#   - Adds a new out_of_scope: "Customer PII export" — assistant's own
+#     additional restriction, not inherited from parent.
+
+principal:
+  id: assistant_agent_v1
+  role: Acme assistant agent acting as principal toward its sub-agents
+
+agent:
+  id: research_agent_v1
+  card_url: https://agents.example.com/research_agent_v1/card.json
+
+scope:
+  - Accounting and tax work    # subset of acme_corp's scope
+
+out_of_scope:
+  - Marketing copy             # inherited from acme_corp
+  - Cold-email campaigns       # inherited from acme_corp
+  - Customer PII export to CSV # assistant's own additional restriction
+
+approval_required:
+  - Any deployment to production environments
+  - Any destructive database action — DROP TABLE, DELETE, TRUNCATE, backup deletion
+
+data_handling:
+  what: Accounting records only — no source code, no email metadata
+  rules: Discard from working memory after task completion
+
+operational:
+  hours: Mon-Fri 09:00-18:00 America/New_York
+  budget_per_task_usd: 0.50
+  budget_monthly_usd: 100.00
+
+style: Concise, structured output; cite sources for factual claims.
+
+lifecycle:
+  valid_days: 30

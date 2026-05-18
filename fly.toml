@@ -15,8 +15,11 @@ primary_region = "iad"
 
 [env]
   # Override per-deploy via `fly secrets set CHARTER_URL_BASE=...`
-  CHARTER_PORT     = "8000"
-  CHARTER_DATA_DIR = "/data"
+  CHARTER_PORT       = "8000"
+  CHARTER_DATA_DIR   = "/data"
+  # JSON logs land in fly's log stream — much easier to ship to Datadog /
+  # Grafana Loki / Mezmo. See charter/_logging.py for the schema.
+  CHARTER_LOG_FORMAT = "json"
 
 [[services]]
   internal_port = 8000

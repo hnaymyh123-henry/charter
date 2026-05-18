@@ -594,6 +594,258 @@ def propose_within_scope_verified(
 
 
 # ---------------------------------------------------------------------------
+# Tool 9: fetch_charter_chain (multi-hop attenuation walk)
+# ---------------------------------------------------------------------------
+
+
+_log_chain_fetch = get_logger("charter.fetch.chain")
+
+
+@mcp.tool()
+def fetch_charter_chain(charter_url: str, max_depth: int = 5) -> dict[str, Any]:
+    """Walk parent_charter_url to the root, verifying each hop's
+    signature, lifecycle, AND attenuation relationship.
+
+    Returns the chain root-first (so chain[0] is the topmost principal
+    and chain[-1] is the leaf you asked for). On any failure — broken
+    signature, broken attenuation, cycle, or depth exceeded — returns
+    `{"ok": false, "reason": "...", "partial": [...]}` with the
+    Charters successfully verified up to that point.
+
+    Args:
+        charter_url:  The leaf Charter's URL. The walk goes upward.
+        max_depth:    Bound on chain length. Default 5; minimum 1.
+
+    Returns:
+        Success:  {"ok": true, "chain": [<root>, ..., <leaf>], "depth": N}
+        Failure:  {"ok": false, "reason": str, "partial": [...verified hops]}
+    """
+    from .chain import verify_chain
+
+    if max_depth < 1:
+        return {"ok": False, "reason": "max_depth must be >= 1", "partial": []}
+
+    # leaf-first walk; we reverse at the end so the caller sees root-first.
+    walked: list[Charter] = []
+    seen_ids: set[str] = set()
+
+    current_url = charter_url
+    while True:
+        if len(walked) >= max_depth:
+            return _chain_failure(
+                f"max_depth={max_depth} exceeded while walking from {charter_url}",
+                walked,
+            )
+
+        try:
+            charter = _fetch_and_verify(current_url)
+        except Exception as e:
+            # Typed errors from _fetch_and_verify propagate as a clean
+            # failure rather than tearing the tool down. The error class
+            # name is informative enough for the caller.
+            return _chain_failure(
+                f"{type(e).__name__}: {e}",
+                walked,
+            )
+
+        # Cycle detection: refuse to revisit a charter_id.
+        if charter.charter_id in seen_ids:
+            return _chain_failure(
+                f"cycle detected at {charter.charter_id}",
+                walked,
+            )
+        seen_ids.add(charter.charter_id)
+
+        walked.append(charter)
+
+        if charter.parent_charter_url is None:
+            break  # reached the root
+        current_url = charter.parent_charter_url
+
+    # walked is leaf-to-root; verify_chain wants child-then-parent, then we
+    # produce a root-first output for the caller.
+    for i in range(len(walked) - 1):
+        child = walked[i]
+        parent = walked[i + 1]
+        if not verify_chain(child, parent):
+            return _chain_failure(
+                f"attenuation broken: {child.charter_id} is not a valid"
+                f" subset of {parent.charter_id}",
+                walked,
+            )
+
+    chain_root_first = list(reversed(walked))
+    _log_chain_fetch.info(
+        "chain fetched",
+        extra={
+            "root_charter_id": chain_root_first[0].charter_id,
+            "leaf_charter_id": chain_root_first[-1].charter_id,
+            "depth": len(chain_root_first),
+            "outcome": "ok",
+        },
+    )
+    return {
+        "ok": True,
+        "chain": [c.model_dump(mode="json") for c in chain_root_first],
+        "depth": len(chain_root_first),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool 10: aggregate_verdict_chain (cross-Charter aggregation)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def aggregate_verdict_chain(
+    chain: list[dict[str, Any]],
+    hits_per_charter: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Combine per-clause hits ACROSS a Charter Chain into one Verdict.
+
+    Inputs:
+        chain:
+            The chain as returned by `fetch_charter_chain` — a list of
+            Charter dicts root-first. Each entry must include `charter_id`
+            and `clauses[]`.
+        hits_per_charter:
+            Map from `charter_id` to the same `hits[]` shape that the
+            single-Charter `aggregate_verdict` accepts. Each Charter in
+            the chain looks up its hits here; missing or empty entries
+            simply mean that Charter contributes no matched clauses.
+
+    Aggregation rule:
+        The same `incompatible > needs_approval > allow` precedence as
+        single-Charter, but applied across all matched clauses from
+        all Charters in the chain. The strictest Charter wins; the
+        `applied` flag is set on every matched_clause whose
+        local_decision matches the final aggregate.
+
+    Output:
+        A `Verdict` with each `matched_clauses` entry carrying
+        `source_charter_id` so the caller can see which Charter forced
+        the outcome. The `reason` string names the applied clauses
+        with `<source_charter_id>::<clause_id>` qualifiers.
+
+    Determinism: no LLM call. Same chain + same hits => same Verdict.
+    """
+    if not chain:
+        return {
+            "ok": False,
+            "reason": "empty chain",
+        }
+
+    matched: list[MatchedClause] = []
+    hit_decisions: list[Decision] = []
+
+    for charter_dict in chain:
+        cid_source = charter_dict.get("charter_id")
+        clauses_data = charter_dict.get("clauses", []) or []
+        type_by_id: dict[str, str] = {c["id"]: c["type"] for c in clauses_data}
+
+        hits = hits_per_charter.get(cid_source or "", []) or []
+        for h in hits:
+            if not h.get("hit", False):
+                continue
+            cid = h.get("id")
+            if not isinstance(cid, str) or cid not in type_by_id:
+                continue
+            clause_type = type_by_id[cid]
+            local = TYPE_TO_DECISION[clause_type]
+            confidence = float(h.get("confidence", 0.0))
+            matched.append(
+                MatchedClause(
+                    id=cid,
+                    local_decision=local,
+                    applied=False,
+                    confidence=confidence,
+                    reason=h.get("reason", ""),
+                    source_charter_id=cid_source if isinstance(cid_source, str) else None,
+                )
+            )
+            hit_decisions.append(local)
+
+    # 0-match fallback — protocol consistency with single-Charter path.
+    if not matched:
+        verdict = Verdict(
+            decision="needs_approval",
+            matched_clauses=[],
+            reason=(
+                "No clauses matched anywhere in the chain; defaulting to "
+                "needs_approval as a conservative fallback."
+            ),
+            rewrite_available=False,
+        )
+        return verdict.model_dump(mode="json")
+
+    # Low-confidence fallback (same threshold as single-Charter).
+    if all(m.confidence < LOW_CONFIDENCE_THRESHOLD for m in matched):
+        for m in matched:
+            m.applied = True
+        verdict = Verdict(
+            decision="needs_approval",
+            matched_clauses=matched,
+            reason=(
+                f"All matched clauses across the chain have low confidence "
+                f"(<{LOW_CONFIDENCE_THRESHOLD}). Defaulting to needs_approval."
+            ),
+            rewrite_available=False,
+        )
+        return verdict.model_dump(mode="json")
+
+    # Normal aggregation: strictest wins, regardless of which Charter
+    # in the chain it came from.
+    decision = aggregate_decision(hit_decisions)
+    for m in matched:
+        if m.local_decision == decision:
+            m.applied = True
+    applied_refs = [f"{m.source_charter_id or '?'}::{m.id}" for m in matched if m.applied]
+    reason = (
+        f"Aggregate decision '{decision}' from applied clauses across the chain: "
+        f"{', '.join(applied_refs)}."
+    )
+
+    # rewrite_available iff incompatible AND at least one out_of_scope hit anywhere.
+    type_by_id_per_charter: dict[str, dict[str, str]] = {
+        (c.get("charter_id") or ""): {cl["id"]: cl["type"] for cl in (c.get("clauses") or [])}
+        for c in chain
+    }
+    rewrite_available = decision == "incompatible" and any(
+        isinstance(h.get("id"), str)
+        and type_by_id_per_charter.get(cid, {}).get(cast(str, h["id"])) == "out_of_scope"
+        and h.get("hit")
+        for cid, hits in hits_per_charter.items()
+        for h in hits
+    )
+
+    verdict = Verdict(
+        decision=decision,
+        matched_clauses=matched,
+        reason=reason,
+        rewrite_available=rewrite_available,
+    )
+    return verdict.model_dump(mode="json")
+
+
+def _chain_failure(reason: str, walked_leaf_first: list[Charter]) -> dict[str, Any]:
+    """Emit a failure log + build the partial-chain response."""
+    partial = list(reversed(walked_leaf_first))
+    _log_chain_fetch.warning(
+        "chain fetch failed",
+        extra={
+            "reason": reason,
+            "depth": len(partial),
+            "outcome": "failed",
+        },
+    )
+    return {
+        "ok": False,
+        "reason": reason,
+        "partial": [c.model_dump(mode="json") for c in partial],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

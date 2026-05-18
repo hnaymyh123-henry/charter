@@ -36,6 +36,11 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.10",
 ]
+# `pip install charter[openai_agents]` to use the
+# `charter.adapters.openai_agents` integration.
+openai_agents = [
+    "openai-agents>=0.2",
+]
 
 [project.scripts]
 charter = "charter.cli:main"
