@@ -68,6 +68,7 @@ import httpx
 # and stays in lockstep with the canonical MCP protocol spec.
 from mcp.server.fastmcp import FastMCP
 
+from ._logging import get_logger
 from .constants import (
     DEFAULT_URL_BASE,
     LOW_CONFIDENCE_THRESHOLD,
@@ -85,6 +86,8 @@ from .errors import (
 from .schema import Charter, MatchedClause, Verdict
 from .signing import verify_charter
 from .storage import data_root
+
+_log = get_logger("charter.fetch")
 
 mcp = FastMCP("charter")
 
@@ -132,29 +135,67 @@ def _fetch_and_verify(charter_url: str) -> Charter:
         - `CharterSignatureError`  — issuer signature does not verify
         - `CharterRevokedError`    — `lifecycle.status == "revoked"`
         - `CharterExpiredError`    — `lifecycle.status in {"expired", "superseded"}`
+
+    Emits exactly one log line per call describing the outcome.
     """
     try:
         resp = httpx.get(charter_url, timeout=10.0)
         resp.raise_for_status()
     except httpx.HTTPStatusError as e:
+        _log.warning(
+            "fetch failed: HTTP error",
+            extra={
+                "url": charter_url,
+                "outcome": "not_found",
+                "status_code": e.response.status_code,
+            },
+        )
         raise CharterNotFoundError(f"GET {charter_url} -> HTTP {e.response.status_code}") from e
     except httpx.RequestError as e:
+        _log.warning(
+            "fetch failed: request error",
+            extra={"url": charter_url, "outcome": "not_found", "error": str(e)},
+        )
         raise CharterNotFoundError(f"GET {charter_url} failed: {e}") from e
 
     try:
         charter = Charter.model_validate(resp.json())
     except Exception as e:
+        _log.warning(
+            "fetch failed: schema error",
+            extra={"url": charter_url, "outcome": "schema_error", "error": str(e)},
+        )
         raise CharterSchemaError(f"Invalid Charter JSON at {charter_url}: {e}") from e
 
     if not verify_charter(charter):
+        _log.error(
+            "fetch failed: signature did not verify",
+            extra={
+                "url": charter_url,
+                "charter_id": charter.charter_id,
+                "outcome": "signature_error",
+            },
+        )
         raise CharterSignatureError(f"Bad signature at {charter_url}")
 
     status = charter.lifecycle.status
+    log_ctx = {
+        "url": charter_url,
+        "charter_id": charter.charter_id,
+        "principal_id": charter.binding.principal_id,
+        "agent_id": charter.binding.agent_id,
+    }
     if status == "revoked":
+        _log.warning("fetch returned revoked charter", extra={**log_ctx, "outcome": "revoked"})
         raise CharterRevokedError(f"Charter status=revoked at {charter_url}")
     if status in ("expired", "superseded"):
+        _log.warning(
+            f"fetch returned {status} charter",
+            extra={**log_ctx, "outcome": status},
+        )
         raise CharterExpiredError(f"Charter status={status} at {charter_url}")
 
+    _log.info("fetch ok", extra={**log_ctx, "outcome": "ok"})
     return charter
 
 

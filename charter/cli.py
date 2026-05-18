@@ -31,6 +31,7 @@ from pathlib import Path
 import click
 from dotenv import load_dotenv
 
+from ._logging import get_logger
 from .constants import DEFAULT_URL_BASE, DEFAULT_VALID_DAYS
 from .projection import load_profile, project
 from .schema import Lifecycle
@@ -38,6 +39,11 @@ from .signing import sign_charter
 from .storage import archive_charter, ensure_issuer_key, load_charter, save_charter
 
 load_dotenv()
+
+_log_issue = get_logger("charter.cli.issue")
+_log_revoke = get_logger("charter.cli.revoke")
+_log_renew = get_logger("charter.cli.renew")
+_log_inspect = get_logger("charter.cli.inspect")
 
 
 @click.group()
@@ -77,6 +83,16 @@ def issue(profile_path: Path) -> None:
 
     base = os.environ.get("CHARTER_URL_BASE", DEFAULT_URL_BASE).rstrip("/")
     charter_url = f"{base}/{profile.principal.id}/{profile.agent.id}"
+
+    _log_issue.info(
+        "charter issued",
+        extra={
+            "charter_id": charter.charter_id,
+            "principal_id": profile.principal.id,
+            "agent_id": profile.agent.id,
+            "outcome": "ok",
+        },
+    )
 
     click.echo("")
     click.echo(click.style("[OK] Charter active", fg="green", bold=True))
@@ -173,6 +189,16 @@ def revoke(principal_id: str, agent_id: str) -> None:
 
     saved = save_charter(charter)
 
+    _log_revoke.info(
+        "charter revoked",
+        extra={
+            "charter_id": charter.charter_id,
+            "principal_id": principal_id,
+            "agent_id": agent_id,
+            "outcome": "ok",
+        },
+    )
+
     click.echo("")
     click.echo(click.style("[OK] Charter revoked", fg="red", bold=True))
     click.echo(f"  charter_id:  {charter.charter_id}")
@@ -258,6 +284,17 @@ def renew(principal_id: str, agent_id: str, valid_days: int | None) -> None:
     # the binding path.
     archived = archive_charter(old)
     saved = save_charter(new)
+
+    _log_renew.info(
+        "charter renewed",
+        extra={
+            "principal_id": principal_id,
+            "agent_id": agent_id,
+            "old_charter_id": old.charter_id,
+            "new_charter_id": new.charter_id,
+            "outcome": "ok",
+        },
+    )
 
     click.echo("")
     click.echo(click.style("[OK] Charter renewed", fg="green", bold=True))
