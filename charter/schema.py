@@ -111,16 +111,37 @@ class Verdict(BaseModel):
 
 
 class RewriteProposal(BaseModel):
-    """Output of `propose_within_scope` MCP tool (success case).
-
-    v0 implementation note: this is a single-shot LLM output, no loopback
-    verification, no retry. See §P2-10 (deferred to v0+).
-    """
+    """Output of `propose_within_scope` (success case)."""
 
     rewritten_task: str
     why_in_scope: str
     referenced_clauses: list[str] = Field(default_factory=list)
     remaining_approval_needed: bool = False
+
+
+class RewriteAttempt(BaseModel):
+    """One iteration of the loopback verification loop.
+
+    `verdict` is `None` when the rewrite generation itself failed (LLM
+    returned literal `null` or produced unparseable output); otherwise it
+    is the verdict that running the per-clause grader + aggregate_verdict
+    on the rewritten task produced.
+    """
+
+    attempt: int = Field(ge=1)
+    temperature: float
+    proposal: RewriteProposal | None
+    verdict: Verdict | None
+    failure_reason: str | None = None
+
+
+class RewriteFailure(BaseModel):
+    """Returned by `propose_within_scope_verified` when no attempt produces
+    an in-scope rewrite within `max_attempts`. The full attempt history is
+    preserved so callers can surface what was tried."""
+
+    attempts: list[RewriteAttempt]
+    reason: str
 
 
 # ---------------------------------------------------------------------------

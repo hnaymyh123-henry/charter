@@ -495,6 +495,64 @@ def propose_within_scope(
 
 
 # ---------------------------------------------------------------------------
+# Tool 8: propose_within_scope_verified (loopback wrapper around tool 7)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def propose_within_scope_verified(
+    charter_url: str,
+    intended_task: str,
+    failed_verdict: dict[str, Any],
+    max_attempts: int = 3,
+) -> dict[str, Any]:
+    """Generate a rewrite, then verify it grades as `allow` — retry if not.
+
+    This is the loopback wrapper around `propose_within_scope`. Each
+    attempt: generate a rewrite at annealed temperature, ask the LLM to
+    grade the rewrite against the Charter's clauses, run
+    `aggregate_verdict` on the resulting hits. If the verdict is `allow`,
+    return the rewrite. Otherwise feed the failure back into the next
+    attempt's prompt and retry, up to `max_attempts`.
+
+    Cost note: this is the only MCP tool that makes multiple LLM calls per
+    invocation — up to `2 × max_attempts`. Calling agents that prefer
+    minimal server-side LLM cost should use `propose_within_scope`
+    (single-shot) and run their own grading loop.
+
+    Returns:
+        Success:  {"ok": true, "proposal": {<RewriteProposal>}, "attempts": N}
+        Failure:  {"ok": false, "reason": "...", "history": [<RewriteAttempt>...]}
+        No-key:   {"ok": false, "reason": "ANTHROPIC_API_KEY not set"}
+    """
+    from .loopback import propose_within_scope_verified as _verified
+    from .schema import RewriteFailure, Verdict
+
+    try:
+        verdict = Verdict.model_validate(failed_verdict)
+    except Exception as e:
+        return {"ok": False, "reason": f"failed_verdict is not a valid Verdict: {e}"}
+
+    charter = _fetch_and_verify(charter_url)
+
+    try:
+        result = _verified(charter, intended_task, verdict, max_attempts=max_attempts)
+    except RuntimeError as e:
+        return {"ok": False, "reason": str(e)}
+
+    if isinstance(result, RewriteFailure):
+        return {
+            "ok": False,
+            "reason": result.reason,
+            "history": [a.model_dump(mode="json") for a in result.attempts],
+        }
+
+    # Success — figure out which attempt landed it (last attempt is the winning one).
+    # We don't carry the full history on success here; that's `history` is for failure.
+    return {"ok": True, "proposal": result.model_dump(mode="json")}
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
