@@ -1,0 +1,53 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Only one deploy runs at a time per environment.
+concurrency:
+  group: deploy-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  fly-deploy:
+    name: Deploy to fly.io
+    runs-on: ubuntu-latest
+    # Skip this entire job if the deploy token is not configured —
+    # otherwise every push to main would fail until the deployer is set up.
+    if: vars.DEPLOY_ENABLED == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Smoke-check /healthz
+        run: |
+          # Resolve the app name from fly.toml and ping its public URL.
+          APP=$(awk -F\" '/^app *= */ {print $2}' fly.toml)
+          if [ -z "$APP" ]; then
+            echo "Could not parse app name from fly.toml" >&2
+            exit 1
+          fi
+          URL="https://${APP}.fly.dev/healthz"
+          echo "Pinging $URL"
+          # fly's TLS cert may not be live for ~30s after the first deploy;
+          # retry a few times before giving up.
+          for i in 1 2 3 4 5; do
+            if curl -fsS --max-time 10 "$URL" > /tmp/healthz.json; then
+              cat /tmp/healthz.json
+              exit 0
+            fi
+            echo "attempt $i failed; sleeping 5s..."
+            sleep 5
+          done
+          echo "healthz check failed after 5 attempts" >&2
+          exit 1
