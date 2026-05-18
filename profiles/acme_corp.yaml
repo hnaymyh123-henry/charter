@@ -1,0 +1,41 @@
+# Acme Corp — Org Principal → Assistant Agent Charter Profile
+#
+# Acme is the top-level (human/org) principal in the two-hop demo. It
+# issues a broad Charter to its assistant agent. The assistant later
+# issues a NARROWER Charter to a downstream research_agent_v1 (see
+# profiles/acme_assistant.yaml) — that one references this Charter as
+# its parent in the chain.
+
+principal:
+  id: acme_corp
+  role: Acme Corp — software + accounting operations
+
+agent:
+  id: assistant_agent_v1
+  card_url: https://agents.example.com/assistant_agent_v1/card.json
+
+scope:
+  - Engineering work
+  - Accounting and tax work
+
+out_of_scope:
+  - Marketing copy
+  - Cold-email campaigns
+
+approval_required:
+  - Any deployment to production environments
+  - Any destructive database action — DROP TABLE, DELETE, TRUNCATE, backup deletion
+
+data_handling:
+  what: Source code, accounting records, customer email metadata
+  rules: Must not share with third parties; must not commit secrets to public repos
+
+operational:
+  hours: Mon-Fri 09:00-18:00 America/New_York
+  budget_per_task_usd: 1.00
+  budget_monthly_usd: 200.00
+
+style: Concise, structured output; cite sources for factual claims.
+
+lifecycle:
+  valid_days: 30
