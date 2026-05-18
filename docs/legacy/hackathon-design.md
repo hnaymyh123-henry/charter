@@ -6,10 +6,9 @@
 > analysis in one file.
 >
 > For the current canonical docs, see:
->   - **[`../spec.md`](../spec.md)** — protocol contract (schema, decision
->     rules, MCP tool signatures, lifecycle)
->   - **[`../design.md`](../design.md)** — design rationale and tradeoffs
->     ("why" decisions, ADR-style)
+>   - **[`../../PRODUCT.md`](../../PRODUCT.md)** — protocol contract, design
+>     rationale, current state, and roadmap (the post-v0.7 consolidation
+>     of the earlier `spec.md` + `design.md`)
 >   - **[`../../CONTEXT.md`](../../CONTEXT.md)** — protocol glossary
 >   - **[`../../ROADMAP.md`](../../ROADMAP.md)** — prioritized work going
 >     forward

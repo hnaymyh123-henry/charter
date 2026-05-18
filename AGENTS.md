@@ -204,9 +204,8 @@ The set of valid principals is whatever has a published Charter at
 ```
 agent contract/
 ├── CONTEXT.md                          protocol glossary
+├── PRODUCT.md                          canonical product doc (spec + rationale + state)
 ├── docs/
-│   ├── spec.md                         protocol contract (schema, rules)
-│   ├── design.md                       rationale + tradeoffs
 │   ├── CODEX_SETUP.md                  local MCP wiring example
 │   └── legacy/hackathon-design.md      original hackathon design doc
 ├── README.md                           install + usage
@@ -223,5 +222,5 @@ agent contract/
 ```
 
 You don't need to read anything else to run the protocol loop. Just follow
-the 5 steps on every `check inbox`. For the full protocol contract see
-[`docs/spec.md`](docs/spec.md); for the "why" see [`docs/design.md`](docs/design.md).
+the 5 steps on every `check inbox`. For the full protocol contract and
+design rationale see [`PRODUCT.md`](PRODUCT.md).

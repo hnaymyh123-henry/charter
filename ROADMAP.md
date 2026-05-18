@@ -4,6 +4,11 @@ From hackathon v0 prototype to landed open-source project. Three focused
 iterations, ~1 week each part-time. Each builds on the previous, ordered
 so the lowest-risk, highest-leverage work happens first.
 
+> **Context.** For *what Charter is and how it works*, see
+> [`PRODUCT.md`](PRODUCT.md). This file is the prioritized iteration
+> plan — what we built, in what order, and what's deferred. The two
+> documents are kept in sync but serve different purposes.
+
 > **What "done" looks like.** v0.7 ships a deployed `https://charter.<host>/`
 > with two-hop Charter Chain attenuation, one framework adapter, signed
 > typed exceptions, propose_within_scope with loopback verification, real

@@ -1,5 +1,11 @@
 # Charter Context
 
+> **What this file is:** the canonical glossary. Every term used in
+> [`PRODUCT.md`](PRODUCT.md), [`ROADMAP.md`](ROADMAP.md), and
+> [`AGENTS.md`](AGENTS.md) is defined here. For the full product
+> description — what Charter is, how it works, what's shipped, and
+> what's next — start with [`PRODUCT.md`](PRODUCT.md).
+
 ## Purpose
 
 Charter is a personal authority layer for the agent economy. It describes the relationship between a principal and an agent: who the agent is acting for, what it is allowed or willing to do in that principal context, and how another agent should check those constraints before delegation.
