@@ -594,6 +594,122 @@ def propose_within_scope_verified(
 
 
 # ---------------------------------------------------------------------------
+# Tool 9: fetch_charter_chain (multi-hop attenuation walk)
+# ---------------------------------------------------------------------------
+
+
+_log_chain_fetch = get_logger("charter.fetch.chain")
+
+
+@mcp.tool()
+def fetch_charter_chain(charter_url: str, max_depth: int = 5) -> dict[str, Any]:
+    """Walk parent_charter_url to the root, verifying each hop's
+    signature, lifecycle, AND attenuation relationship.
+
+    Returns the chain root-first (so chain[0] is the topmost principal
+    and chain[-1] is the leaf you asked for). On any failure — broken
+    signature, broken attenuation, cycle, or depth exceeded — returns
+    `{"ok": false, "reason": "...", "partial": [...]}` with the
+    Charters successfully verified up to that point.
+
+    Args:
+        charter_url:  The leaf Charter's URL. The walk goes upward.
+        max_depth:    Bound on chain length. Default 5; minimum 1.
+
+    Returns:
+        Success:  {"ok": true, "chain": [<root>, ..., <leaf>], "depth": N}
+        Failure:  {"ok": false, "reason": str, "partial": [...verified hops]}
+    """
+    from .chain import verify_chain
+
+    if max_depth < 1:
+        return {"ok": False, "reason": "max_depth must be >= 1", "partial": []}
+
+    # leaf-first walk; we reverse at the end so the caller sees root-first.
+    walked: list[Charter] = []
+    seen_ids: set[str] = set()
+
+    current_url = charter_url
+    while True:
+        if len(walked) >= max_depth:
+            return _chain_failure(
+                f"max_depth={max_depth} exceeded while walking from {charter_url}",
+                walked,
+            )
+
+        try:
+            charter = _fetch_and_verify(current_url)
+        except Exception as e:
+            # Typed errors from _fetch_and_verify propagate as a clean
+            # failure rather than tearing the tool down. The error class
+            # name is informative enough for the caller.
+            return _chain_failure(
+                f"{type(e).__name__}: {e}",
+                walked,
+            )
+
+        # Cycle detection: refuse to revisit a charter_id.
+        if charter.charter_id in seen_ids:
+            return _chain_failure(
+                f"cycle detected at {charter.charter_id}",
+                walked,
+            )
+        seen_ids.add(charter.charter_id)
+
+        walked.append(charter)
+
+        if charter.parent_charter_url is None:
+            break  # reached the root
+        current_url = charter.parent_charter_url
+
+    # walked is leaf-to-root; verify_chain wants child-then-parent, then we
+    # produce a root-first output for the caller.
+    for i in range(len(walked) - 1):
+        child = walked[i]
+        parent = walked[i + 1]
+        if not verify_chain(child, parent):
+            return _chain_failure(
+                f"attenuation broken: {child.charter_id} is not a valid"
+                f" subset of {parent.charter_id}",
+                walked,
+            )
+
+    chain_root_first = list(reversed(walked))
+    _log_chain_fetch.info(
+        "chain fetched",
+        extra={
+            "root_charter_id": chain_root_first[0].charter_id,
+            "leaf_charter_id": chain_root_first[-1].charter_id,
+            "depth": len(chain_root_first),
+            "outcome": "ok",
+        },
+    )
+    return {
+        "ok": True,
+        "chain": [c.model_dump(mode="json") for c in chain_root_first],
+        "depth": len(chain_root_first),
+    }
+
+
+def _chain_failure(reason: str, walked_leaf_first: list[Charter]) -> dict[str, Any]:
+    """Emit a failure log + build the partial-chain response."""
+    partial = list(reversed(walked_leaf_first))
+    _log_chain_fetch.warning(
+        "chain fetch failed",
+        extra={
+            "reason": reason,
+            "depth": len(partial),
+            "outcome": "failed",
+        },
+    )
+    return {
+        "ok": False,
+        "reason": reason,
+        "partial": [c.model_dump(mode="json") for c in partial],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
