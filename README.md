@@ -16,7 +16,7 @@ Charters, one per principal — same binary, different boundaries.
 
 **Docs:**
 
-- **[`PRODUCT.md`](PRODUCT.md)** — the canonical product document: what Charter is, why, how it works (protocol + schema + tools), current state, and roadmap. Start here.
+- **[`PRODUCT.md`](PRODUCT.md)** — the canonical product document: what Charter is, why, how it works (protocol + schema + tools), current state, and roadmap. Start here. (Chinese mirror: [`PRODUCT.zh.md`](PRODUCT.zh.md).)
 - **[`CONTEXT.md`](CONTEXT.md)** — glossary of every term used in PRODUCT.md.
 - **[`ROADMAP.md`](ROADMAP.md)** — detailed iteration plans for v0.5 / v0.6 / v0.7.
 - **[`AGENTS.md`](AGENTS.md)** — protocol behavior for worker agents (the 5-step Compatibility Check loop).

@@ -11,6 +11,9 @@ guide see [`README.md`](README.md); for canonical terminology see
 [`CONTEXT.md`](CONTEXT.md); for the prioritized iteration plan see
 [`ROADMAP.md`](ROADMAP.md).
 
+> **中文读者**:本文有一份对应的中文版 [`PRODUCT.zh.md`](PRODUCT.zh.md)
+> ,内容跟英文版保持同步。英文版是 canonical;中文版为方便阅读保留。
+
 ---
 
 ## Contents
