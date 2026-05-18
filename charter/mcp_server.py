@@ -68,6 +68,7 @@ import httpx
 # and stays in lockstep with the canonical MCP protocol spec.
 from mcp.server.fastmcp import FastMCP
 
+from ._logging import get_logger
 from .constants import (
     DEFAULT_URL_BASE,
     LOW_CONFIDENCE_THRESHOLD,
@@ -85,6 +86,8 @@ from .errors import (
 from .schema import Charter, MatchedClause, Verdict
 from .signing import verify_charter
 from .storage import data_root
+
+_log = get_logger("charter.fetch")
 
 mcp = FastMCP("charter")
 
@@ -132,29 +135,67 @@ def _fetch_and_verify(charter_url: str) -> Charter:
         - `CharterSignatureError`  — issuer signature does not verify
         - `CharterRevokedError`    — `lifecycle.status == "revoked"`
         - `CharterExpiredError`    — `lifecycle.status in {"expired", "superseded"}`
+
+    Emits exactly one log line per call describing the outcome.
     """
     try:
         resp = httpx.get(charter_url, timeout=10.0)
         resp.raise_for_status()
     except httpx.HTTPStatusError as e:
+        _log.warning(
+            "fetch failed: HTTP error",
+            extra={
+                "url": charter_url,
+                "outcome": "not_found",
+                "status_code": e.response.status_code,
+            },
+        )
         raise CharterNotFoundError(f"GET {charter_url} -> HTTP {e.response.status_code}") from e
     except httpx.RequestError as e:
+        _log.warning(
+            "fetch failed: request error",
+            extra={"url": charter_url, "outcome": "not_found", "error": str(e)},
+        )
         raise CharterNotFoundError(f"GET {charter_url} failed: {e}") from e
 
     try:
         charter = Charter.model_validate(resp.json())
     except Exception as e:
+        _log.warning(
+            "fetch failed: schema error",
+            extra={"url": charter_url, "outcome": "schema_error", "error": str(e)},
+        )
         raise CharterSchemaError(f"Invalid Charter JSON at {charter_url}: {e}") from e
 
     if not verify_charter(charter):
+        _log.error(
+            "fetch failed: signature did not verify",
+            extra={
+                "url": charter_url,
+                "charter_id": charter.charter_id,
+                "outcome": "signature_error",
+            },
+        )
         raise CharterSignatureError(f"Bad signature at {charter_url}")
 
     status = charter.lifecycle.status
+    log_ctx = {
+        "url": charter_url,
+        "charter_id": charter.charter_id,
+        "principal_id": charter.binding.principal_id,
+        "agent_id": charter.binding.agent_id,
+    }
     if status == "revoked":
+        _log.warning("fetch returned revoked charter", extra={**log_ctx, "outcome": "revoked"})
         raise CharterRevokedError(f"Charter status=revoked at {charter_url}")
     if status in ("expired", "superseded"):
+        _log.warning(
+            f"fetch returned {status} charter",
+            extra={**log_ctx, "outcome": status},
+        )
         raise CharterExpiredError(f"Charter status={status} at {charter_url}")
 
+    _log.info("fetch ok", extra={**log_ctx, "outcome": "ok"})
     return charter
 
 
@@ -438,6 +479,118 @@ def read_outbox() -> dict[str, Any] | None:
     Returns None if the outbox is empty.
     """
     return _read_json(_outbox_path())
+
+
+# ---------------------------------------------------------------------------
+# Tool 7: propose_within_scope (protocol layer; one LLM call)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def propose_within_scope(
+    charter_url: str,
+    intended_task: str,
+    failed_verdict: dict[str, Any],
+) -> dict[str, Any]:
+    """Suggest an in-scope rewrite of a task that failed compatibility check.
+
+    Call this only when `aggregate_verdict` returned
+    `decision=incompatible` AND `rewrite_available=true`. Given the same
+    Charter, the original task, and the failed Verdict, this returns a
+    nearby task that DOES fit the Charter's scope.
+
+    This tool makes one LLM call (the only LLM call any charter MCP tool
+    makes). The single-shot path is what this iteration ships; loopback
+    verification with retry will wrap this in a future iteration.
+
+    Args:
+        charter_url:    The same URL that was passed to `fetch_charter`.
+        intended_task:  The original natural-language task description.
+        failed_verdict: The Verdict dict returned by `aggregate_verdict`.
+
+    Returns:
+        On success: {"ok": true, "proposal": {<RewriteProposal fields>}}.
+        On no-rewrite-feasible: {"ok": false, "reason": "no viable rewrite"}.
+        On missing API key:     {"ok": false, "reason": "no LLM configured"}.
+    """
+    from .propose import propose_within_scope_llm
+    from .schema import Verdict
+
+    try:
+        verdict = Verdict.model_validate(failed_verdict)
+    except Exception as e:
+        return {"ok": False, "reason": f"failed_verdict is not a valid Verdict: {e}"}
+
+    charter = _fetch_and_verify(charter_url)
+
+    try:
+        proposal = propose_within_scope_llm(charter, intended_task, verdict)
+    except RuntimeError as e:
+        # Missing API key — surface a clean degraded response.
+        return {"ok": False, "reason": str(e)}
+
+    if proposal is None:
+        return {"ok": False, "reason": "no viable rewrite within Charter scope"}
+
+    return {"ok": True, "proposal": proposal.model_dump(mode="json")}
+
+
+# ---------------------------------------------------------------------------
+# Tool 8: propose_within_scope_verified (loopback wrapper around tool 7)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def propose_within_scope_verified(
+    charter_url: str,
+    intended_task: str,
+    failed_verdict: dict[str, Any],
+    max_attempts: int = 3,
+) -> dict[str, Any]:
+    """Generate a rewrite, then verify it grades as `allow` — retry if not.
+
+    This is the loopback wrapper around `propose_within_scope`. Each
+    attempt: generate a rewrite at annealed temperature, ask the LLM to
+    grade the rewrite against the Charter's clauses, run
+    `aggregate_verdict` on the resulting hits. If the verdict is `allow`,
+    return the rewrite. Otherwise feed the failure back into the next
+    attempt's prompt and retry, up to `max_attempts`.
+
+    Cost note: this is the only MCP tool that makes multiple LLM calls per
+    invocation — up to `2 × max_attempts`. Calling agents that prefer
+    minimal server-side LLM cost should use `propose_within_scope`
+    (single-shot) and run their own grading loop.
+
+    Returns:
+        Success:  {"ok": true, "proposal": {<RewriteProposal>}, "attempts": N}
+        Failure:  {"ok": false, "reason": "...", "history": [<RewriteAttempt>...]}
+        No-key:   {"ok": false, "reason": "ANTHROPIC_API_KEY not set"}
+    """
+    from .loopback import propose_within_scope_verified as _verified
+    from .schema import RewriteFailure, Verdict
+
+    try:
+        verdict = Verdict.model_validate(failed_verdict)
+    except Exception as e:
+        return {"ok": False, "reason": f"failed_verdict is not a valid Verdict: {e}"}
+
+    charter = _fetch_and_verify(charter_url)
+
+    try:
+        result = _verified(charter, intended_task, verdict, max_attempts=max_attempts)
+    except RuntimeError as e:
+        return {"ok": False, "reason": str(e)}
+
+    if isinstance(result, RewriteFailure):
+        return {
+            "ok": False,
+            "reason": result.reason,
+            "history": [a.model_dump(mode="json") for a in result.attempts],
+        }
+
+    # Success — figure out which attempt landed it (last attempt is the winning one).
+    # We don't carry the full history on success here; that's `history` is for failure.
+    return {"ok": True, "proposal": result.model_dump(mode="json")}
 
 
 # ---------------------------------------------------------------------------
