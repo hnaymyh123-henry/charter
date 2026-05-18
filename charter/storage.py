@@ -1,16 +1,20 @@
 """Local file I/O for Charters and issuer keys.
 
-v0 stores everything under `./data/`:
+Layout under `data/`:
 
     data/
       charters/
-        <principal_id>__<agent_id>.json      <- one Charter per binding
+        <principal_id>__<agent_id>.json      live Charter for the binding
+        archive/
+          <safe_charter_id>.json             superseded/revoked predecessors
       keys/
-        <principal_id>.pem                   <- one Ed25519 private key per issuer
+        <principal_id>.pem                   Ed25519 private key per issuer
 
-A `data/charters/index.json` directory file maps
-`(principal_id, agent_id) -> filename` for `resolve_charter_url` lookups
-(v0+ extension; demo can skip the SDK helper and just compose URLs directly).
+The live Charter is the one served by the FastAPI host at
+`/{principal}/{agent}`. The archive directory exists so that a renewed or
+revoked Charter's predecessor is still recoverable by `charter_id` —
+useful for audit trails and for resolving a `replaces` / `replaced_by`
+chain when a calling agent only knows the old `charter_id`.
 """
 
 from __future__ import annotations
@@ -54,6 +58,16 @@ def charter_path(principal_id: str, agent_id: str) -> Path:
     return charters_dir() / f"{_safe(principal_id)}__{_safe(agent_id)}.json"
 
 
+def archive_dir() -> Path:
+    d = charters_dir() / "archive"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def archive_path(charter_id: str) -> Path:
+    return archive_dir() / f"{_safe(charter_id)}.json"
+
+
 def key_path(principal_id: str) -> Path:
     return keys_dir() / f"{_safe(principal_id)}.pem"
 
@@ -64,15 +78,41 @@ def key_path(principal_id: str) -> Path:
 
 
 def save_charter(charter: Charter) -> Path:
-    """Write a Charter JSON to disk. Returns the path written."""
+    """Write a Charter JSON to disk at the canonical binding path.
+
+    Returns the path written. This is the "live" Charter for the
+    binding. Predecessors with `status in {"superseded", "revoked"}` are
+    written to the archive via `archive_charter` instead, so the live
+    binding path always holds the currently-authoritative Charter.
+    """
     path = charter_path(charter.binding.principal_id, charter.binding.agent_id)
     path.write_text(charter.model_dump_json(indent=2), encoding="utf-8")
     return path
 
 
+def archive_charter(charter: Charter) -> Path:
+    """Write a superseded or revoked Charter to the archive directory.
+
+    Used by `charter renew` so the predecessor remains queryable by
+    `charter_id` after the live binding path is overwritten by the
+    successor. Returns the archived path.
+    """
+    path = archive_path(charter.charter_id)
+    path.write_text(charter.model_dump_json(indent=2), encoding="utf-8")
+    return path
+
+
 def load_charter(principal_id: str, agent_id: str) -> Charter | None:
-    """Load a Charter by binding, or None if not found."""
+    """Load the live Charter for a binding, or None if not found."""
     path = charter_path(principal_id, agent_id)
+    if not path.exists():
+        return None
+    return Charter.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+def load_archived_charter(charter_id: str) -> Charter | None:
+    """Load a previously archived (superseded/revoked) Charter by id."""
+    path = archive_path(charter_id)
     if not path.exists():
         return None
     return Charter.model_validate_json(path.read_text(encoding="utf-8"))
