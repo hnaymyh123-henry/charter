@@ -16,10 +16,10 @@ Charters, one per principal — same binary, different boundaries.
 
 **Docs:**
 
-- **[`docs/spec.md`](docs/spec.md)** — protocol contract: schema, decision rules, lifecycle, MCP tool signatures.
-- **[`docs/design.md`](docs/design.md)** — design rationale and tradeoffs (ADR-style).
-- **[`CONTEXT.md`](CONTEXT.md)** — protocol glossary.
-- **[`ROADMAP.md`](ROADMAP.md)** — prioritized work for upcoming iterations.
+- **[`PRODUCT.md`](PRODUCT.md)** — the canonical product document: what Charter is, why, how it works (protocol + schema + tools), current state, and roadmap. Start here. (Chinese mirror: [`PRODUCT.zh.md`](PRODUCT.zh.md).)
+- **[`CONTEXT.md`](CONTEXT.md)** — glossary of every term used in PRODUCT.md.
+- **[`ROADMAP.md`](ROADMAP.md)** — detailed iteration plans for v0.5 / v0.6 / v0.7.
+- **[`AGENTS.md`](AGENTS.md)** — protocol behavior for worker agents (the 5-step Compatibility Check loop).
 - **[`docs/legacy/hackathon-design.md`](docs/legacy/hackathon-design.md)** — original hackathon design doc, kept for historical reference.
 
 ---
@@ -197,9 +197,8 @@ agent contract/
 ├── Dockerfile                          multi-stage image; `charter-server` as CMD
 ├── fly.toml                            fly.io deployment template
 ├── .github/workflows/ci.yml            lint + mypy + pytest matrix
+├── PRODUCT.md                          canonical product doc (spec + rationale + state + roadmap)
 ├── docs/
-│   ├── spec.md                         protocol contract
-│   ├── design.md                       design rationale
 │   ├── CODEX_SETUP.md                  local MCP wiring example
 │   └── legacy/
 │       └── hackathon-design.md         original hackathon design doc
@@ -243,7 +242,7 @@ What's done in v0.5 (this iteration): Apache 2.0 license, typed exceptions
 (`charter.errors`), `.well-known/charter/{agent_id}` self-hosted mode,
 `/healthz` endpoint, Dockerfile + fly.toml deployment template, ruff +
 mypy --strict in CI on `{py3.12, py3.13} × {ubuntu, macos, windows}`, and
-the doc split (`docs/spec.md` + `docs/design.md`).
+the doc split (later merged into [`PRODUCT.md`](PRODUCT.md) post-v0.7).
 
 ---
 
