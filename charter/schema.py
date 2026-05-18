@@ -13,19 +13,20 @@ All models below are Pydantic v2 and serialize to JSON with `.model_dump()`.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from .constants import CHARTER_VERSION
 
-
 # ---------------------------------------------------------------------------
 # Binding & metadata
 # ---------------------------------------------------------------------------
 
+
 class Binding(BaseModel):
     """The `principal × agent` relationship object. Unique key of a Charter."""
+
     type: Literal["principal_agent"] = "principal_agent"
     principal_id: str
     agent_id: str
@@ -46,12 +47,13 @@ class Issuer(BaseModel):
 class AgentOperator(BaseModel):
     type: Literal["service", "human", "organization"] = "service"
     id: str
-    agent_card_url: Optional[str] = None
+    agent_card_url: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Visibility, summary, clauses
 # ---------------------------------------------------------------------------
+
 
 class Visibility(BaseModel):
     charter: Literal["public"] = "public"
@@ -71,6 +73,7 @@ class Clause(BaseModel):
     by the intended task; it does NOT decide allow/needs_approval/incompatible
     on its own.
     """
+
     id: str
     type: Literal[
         "scope",
@@ -87,19 +90,20 @@ class Clause(BaseModel):
 # Decision schema (verdict + matched clauses)
 # ---------------------------------------------------------------------------
 
+
 class MatchedClause(BaseModel):
     """One row in `Verdict.matched_clauses` — structured per §P2-11 ⑬."""
+
     id: str
     local_decision: Literal["allow", "needs_approval", "incompatible"]
-    applied: bool = Field(
-        description="True iff this clause determined the aggregate decision."
-    )
+    applied: bool = Field(description="True iff this clause determined the aggregate decision.")
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str
 
 
 class Verdict(BaseModel):
     """Compatibility Check output. Returned by `check_compatibility` MCP tool."""
+
     decision: Literal["allow", "needs_approval", "incompatible"]
     matched_clauses: list[MatchedClause] = Field(default_factory=list)
     reason: str
@@ -112,6 +116,7 @@ class RewriteProposal(BaseModel):
     v0 implementation note: this is a single-shot LLM output, no loopback
     verification, no retry. See §P2-10 (deferred to v0+).
     """
+
     rewritten_task: str
     why_in_scope: str
     referenced_clauses: list[str] = Field(default_factory=list)
@@ -122,13 +127,14 @@ class RewriteProposal(BaseModel):
 # Lifecycle & provenance
 # ---------------------------------------------------------------------------
 
+
 class Lifecycle(BaseModel):
     issued_at: datetime
     valid_until: datetime
     status: Literal["active", "expired", "revoked", "superseded"] = "active"
-    revoked_at: Optional[datetime] = None
-    replaces: Optional[str] = None
-    replaced_by: Optional[str] = None
+    revoked_at: datetime | None = None
+    replaces: str | None = None
+    replaced_by: str | None = None
 
 
 class SourceCommitment(BaseModel):
@@ -137,6 +143,7 @@ class SourceCommitment(BaseModel):
     Only the SHA-256 hash of the raw content is published — never the content
     itself. This preserves the Principal Context / Public Charter boundary.
     """
+
     type: str  # e.g. "profile_yaml"
     description: str
     content_hash: str  # "sha256:<hex>"
@@ -149,8 +156,9 @@ class Provenance(BaseModel):
     Calling agents verify `issuer_signature` against this public key directly,
     using HTTPS to charter_url as the trust root.
     """
-    issuer_public_key: str          # "ed25519:<base64>"
-    issuer_signature: str = ""      # "ed25519:<base64>" — set during signing
+
+    issuer_public_key: str  # "ed25519:<base64>"
+    issuer_signature: str = ""  # "ed25519:<base64>" — set during signing
     source_commitments: list[SourceCommitment] = Field(default_factory=list)
     generated_at: datetime
 
@@ -159,14 +167,14 @@ class Provenance(BaseModel):
 # Charter (top-level)
 # ---------------------------------------------------------------------------
 
+
 class DecisionSchemaDoc(BaseModel):
     """Inline schema documentation embedded in every Charter so callers know
     what `Verdict` shape to expect. Not used at runtime — informational only.
     """
+
     decision: str = "allow | needs_approval | incompatible"
-    matched_clauses: str = (
-        "[{id, local_decision, applied, confidence in [0,1], reason}]"
-    )
+    matched_clauses: str = "[{id, local_decision, applied, confidence in [0,1], reason}]"
     reason: str = "string -- short summary referencing applied clauses"
     rewrite_available: str = "bool -- whether propose_within_scope might help"
 
@@ -197,6 +205,7 @@ class Charter(BaseModel):
 # Profile (input to `charter issue`)
 # ---------------------------------------------------------------------------
 
+
 class ProfilePrincipal(BaseModel):
     id: str
     role: str
@@ -204,7 +213,7 @@ class ProfilePrincipal(BaseModel):
 
 class ProfileAgent(BaseModel):
     id: str
-    card_url: Optional[str] = None
+    card_url: str | None = None
 
 
 class ProfileDataHandling(BaseModel):
@@ -214,8 +223,8 @@ class ProfileDataHandling(BaseModel):
 
 class ProfileOperational(BaseModel):
     hours: str = "anytime"
-    budget_per_task_usd: Optional[float] = None
-    budget_monthly_usd: Optional[float] = None
+    budget_per_task_usd: float | None = None
+    budget_monthly_usd: float | None = None
 
 
 class ProfileLifecycle(BaseModel):
@@ -236,7 +245,7 @@ class Profile(BaseModel):
     scope: list[str]
     out_of_scope: list[str] = Field(default_factory=list)
     approval_required: list[str] = Field(default_factory=list)
-    data_handling: Optional[ProfileDataHandling] = None
-    operational: Optional[ProfileOperational] = None
-    style: Optional[str] = None
+    data_handling: ProfileDataHandling | None = None
+    operational: ProfileOperational | None = None
+    style: str | None = None
     lifecycle: ProfileLifecycle = Field(default_factory=ProfileLifecycle)

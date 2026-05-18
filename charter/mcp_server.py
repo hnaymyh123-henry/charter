@@ -54,10 +54,12 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, cast
 
 import httpx
+
 # Use the FastMCP shim from Anthropic's official `mcp` Python SDK, not the
 # standalone `fastmcp` package. The standalone package's 3.x release ships a
 # different stdio protocol revision that OpenAI Codex CLI does not recognize,
@@ -70,12 +72,19 @@ from .constants import (
     DEFAULT_URL_BASE,
     LOW_CONFIDENCE_THRESHOLD,
     TYPE_TO_DECISION,
+    Decision,
     aggregate_decision,
+)
+from .errors import (
+    CharterExpiredError,
+    CharterNotFoundError,
+    CharterRevokedError,
+    CharterSchemaError,
+    CharterSignatureError,
 )
 from .schema import Charter, MatchedClause, Verdict
 from .signing import verify_charter
 from .storage import data_root
-
 
 mcp = FastMCP("charter")
 
@@ -84,56 +93,67 @@ mcp = FastMCP("charter")
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
-def _messages_dir():
+def _messages_dir() -> Path:
     path = data_root() / "messages"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def _inbox_path():
+def _inbox_path() -> Path:
     return _messages_dir() / "inbox.json"
 
 
-def _outbox_path():
+def _outbox_path() -> Path:
     return _messages_dir() / "outbox.json"
 
 
-def _write_json(path, payload: dict) -> None:
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def _read_json(path) -> Optional[dict]:
+def _read_json(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return data
 
 
 def _fetch_and_verify(charter_url: str) -> Charter:
     """Fetch a Charter JSON, parse, verify signature, check lifecycle.
 
-    Raises ValueError on any failure.
+    Raises one of `charter.errors.CharterError` subclasses on failure:
+        - `CharterNotFoundError`   — network failure or non-2xx HTTP response
+        - `CharterSchemaError`     — body is not a valid Charter
+        - `CharterSignatureError`  — issuer signature does not verify
+        - `CharterRevokedError`    — `lifecycle.status == "revoked"`
+        - `CharterExpiredError`    — `lifecycle.status in {"expired", "superseded"}`
     """
     try:
         resp = httpx.get(charter_url, timeout=10.0)
         resp.raise_for_status()
-    except Exception as e:
-        raise ValueError(f"CharterNotFoundError: GET {charter_url} failed: {e}")
+    except httpx.HTTPStatusError as e:
+        raise CharterNotFoundError(f"GET {charter_url} -> HTTP {e.response.status_code}") from e
+    except httpx.RequestError as e:
+        raise CharterNotFoundError(f"GET {charter_url} failed: {e}") from e
 
     try:
         charter = Charter.model_validate(resp.json())
     except Exception as e:
-        raise ValueError(f"Invalid Charter JSON at {charter_url}: {e}")
+        raise CharterSchemaError(f"Invalid Charter JSON at {charter_url}: {e}") from e
 
     if not verify_charter(charter):
-        raise ValueError(f"CharterSignatureError: bad signature at {charter_url}")
+        raise CharterSignatureError(f"Bad signature at {charter_url}")
 
     status = charter.lifecycle.status
-    if status in ("expired", "revoked", "superseded"):
-        raise ValueError(f"CharterExpiredError: status={status}")
+    if status == "revoked":
+        raise CharterRevokedError(f"Charter status=revoked at {charter_url}")
+    if status in ("expired", "superseded"):
+        raise CharterExpiredError(f"Charter status={status} at {charter_url}")
 
     return charter
 
@@ -142,8 +162,9 @@ def _fetch_and_verify(charter_url: str) -> Charter:
 # Tool 1: fetch_charter (data access + protocol hints)
 # ---------------------------------------------------------------------------
 
+
 @mcp.tool()
-def fetch_charter(charter_url: str) -> dict:
+def fetch_charter(charter_url: str) -> dict[str, Any]:
     """Fetch a Charter by URL, verify its signature, return the JSON + hints.
 
     The `protocol_hints` field tells the caller's LLM exactly how to reason:
@@ -178,9 +199,7 @@ def fetch_charter(charter_url: str) -> dict:
             ),
             "verdict_schema": {
                 "decision": "allow | needs_approval | incompatible",
-                "matched_clauses": (
-                    "list of {id, local_decision, applied, confidence, reason}"
-                ),
+                "matched_clauses": ("list of {id, local_decision, applied, confidence, reason}"),
                 "reason": "string -- short summary referencing applied clauses",
                 "rewrite_available": "bool",
             },
@@ -201,8 +220,9 @@ def fetch_charter(charter_url: str) -> dict:
 # Tool 2: aggregate_verdict (protocol layer, no LLM)
 # ---------------------------------------------------------------------------
 
+
 @mcp.tool()
-def aggregate_verdict(charter: dict, hits: list[dict]) -> dict:
+def aggregate_verdict(charter: dict[str, Any], hits: list[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate per-clause hits into a structured Verdict.
 
     Args:
@@ -218,16 +238,16 @@ def aggregate_verdict(charter: dict, hits: list[dict]) -> dict:
     hits it always returns the same Verdict.
     """
     clauses_data = charter.get("clauses", []) or []
-    type_by_id = {c["id"]: c["type"] for c in clauses_data}
+    type_by_id: dict[str, str] = {c["id"]: c["type"] for c in clauses_data}
 
     matched: list[MatchedClause] = []
-    hit_decisions: list[str] = []
+    hit_decisions: list[Decision] = []
 
     for h in hits:
         if not h.get("hit", False):
             continue
         cid = h.get("id")
-        if cid not in type_by_id:
+        if not isinstance(cid, str) or cid not in type_by_id:
             continue
         clause_type = type_by_id[cid]
         local = TYPE_TO_DECISION[clause_type]
@@ -277,14 +297,13 @@ def aggregate_verdict(charter: dict, hits: list[dict]) -> dict:
         if m.local_decision == decision:
             m.applied = True
     applied_ids = [m.id for m in matched if m.applied]
-    reason = (
-        f"Aggregate decision '{decision}' from applied clauses: "
-        f"{', '.join(applied_ids)}."
-    )
+    reason = f"Aggregate decision '{decision}' from applied clauses: {', '.join(applied_ids)}."
 
     # rewrite_available iff incompatible AND at least one out_of_scope was hit
     rewrite_available = decision == "incompatible" and any(
-        type_by_id.get(h.get("id")) == "out_of_scope" and h.get("hit")
+        isinstance(h.get("id"), str)
+        and type_by_id.get(cast(str, h["id"])) == "out_of_scope"
+        and h.get("hit")
         for h in hits
     )
 
@@ -301,13 +320,14 @@ def aggregate_verdict(charter: dict, hits: list[dict]) -> dict:
 # Tool 3: delegate_task (calling agent -> inbox)
 # ---------------------------------------------------------------------------
 
+
 @mcp.tool()
 def delegate_task(
     target_principal_id: str,
     target_agent_id: str,
     intended_task: str,
     from_agent: str = "claude_code",
-) -> dict:
+) -> dict[str, Any]:
     """Send a task to the target agent by writing to the inbox file.
 
     The target agent should call check_inbox() to receive it.
@@ -357,8 +377,9 @@ def delegate_task(
 # Tool 4: check_inbox (target agent reads pending task)
 # ---------------------------------------------------------------------------
 
+
 @mcp.tool()
-def check_inbox() -> Optional[dict]:
+def check_inbox() -> dict[str, Any] | None:
     """Read the most recent task delivered to this target agent.
 
     Returns None if the inbox is empty.
@@ -370,15 +391,16 @@ def check_inbox() -> Optional[dict]:
 # Tool 5: send_result (target agent -> outbox)
 # ---------------------------------------------------------------------------
 
+
 @mcp.tool()
 def send_result(
     task_id: str,
-    verdict: dict,
+    verdict: dict[str, Any],
     response_text: str,
     executed: bool = False,
-    execution_output: Optional[str] = None,
+    execution_output: str | None = None,
     from_agent: str = "codex",
-) -> dict:
+) -> dict[str, Any]:
     """Write the target agent's reply to the outbox file.
 
     The calling agent will see it via read_outbox().
@@ -408,8 +430,9 @@ def send_result(
 # Tool 6: read_outbox (calling agent reads target's reply)
 # ---------------------------------------------------------------------------
 
+
 @mcp.tool()
-def read_outbox() -> Optional[dict]:
+def read_outbox() -> dict[str, Any] | None:
     """Read the most recent reply from the target agent.
 
     Returns None if the outbox is empty.
@@ -420,6 +443,7 @@ def read_outbox() -> Optional[dict]:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def run() -> None:
     """Console-script entry point: `charter-mcp`. Speaks stdio MCP."""

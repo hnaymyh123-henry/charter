@@ -1,10 +1,7 @@
 """Seed Charters without an LLM call.
 
-Used in two situations:
-    1. Demo time, when we don't want to depend on a live API key.
-    2. Local development before adding a key.
-
-Replaces the single LLM call inside `charter.projection.project()` with a
+Useful for local development or CI when no Anthropic API key is available:
+replaces the single LLM call inside `charter.projection.project()` with a
 hand-curated set of clauses + summary, then runs sign + save through the
 real code path. The produced Charter is byte-for-byte indistinguishable
 from one issued by `charter issue` with a working key.
@@ -17,7 +14,7 @@ Usage:
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # Allow running this from anywhere; add repo root to sys.path.
@@ -34,7 +31,6 @@ from charter.schema import (
     Issuer,
     Lifecycle,
     Principal,
-    Profile,
     Provenance,
     SourceCommitment,
     Summary,
@@ -42,27 +38,47 @@ from charter.schema import (
 from charter.signing import public_key_to_string, sign_charter
 from charter.storage import ensure_issuer_key, save_charter
 
-
 # ---------------------------------------------------------------------------
 # Hand-curated clauses per principal (mirrors what the LLM would produce
 # from profiles/{alice,bob}.yaml).
 # ---------------------------------------------------------------------------
 
 ALICE_CLAUSES = [
-    Clause(id="C-001", type="scope",
-        text="This agent acts for Alice's accounting, tax filing, bookkeeping, financial analysis, invoice classification, and tax document organization work."),
-    Clause(id="C-002", type="out_of_scope",
-        text="Do not accept marketing copy, advertising design, code authoring, or UI design work. These require a separate Charter."),
-    Clause(id="C-003", type="approval_required",
-        text="Any handling of customer personally identifiable information (name + bank/tax/income combinations) requires explicit principal approval per session."),
-    Clause(id="C-004", type="approval_required",
-        text="Any destructive action on production data --DROP, DELETE, TRUNCATE, or backup deletion --requires explicit human approval."),
-    Clause(id="C-005", type="operational_limit",
-        text="Operational window is Monday to Friday, 09:00-18:00 America/New_York. Per-task budget cap is USD 0.50."),
-    Clause(id="C-006", type="data_handling",
-        text="May process customer tax filings, tax IDs, bank statements, and income records. Must not share with third parties, must not persist after task completion."),
-    Clause(id="C-007", type="style",
-        text="Prefer structured output (JSON or Markdown table). Cite sources for factual claims. Respond in English or Chinese."),
+    Clause(
+        id="C-001",
+        type="scope",
+        text="This agent acts for Alice's accounting, tax filing, bookkeeping, financial analysis, invoice classification, and tax document organization work.",
+    ),
+    Clause(
+        id="C-002",
+        type="out_of_scope",
+        text="Do not accept marketing copy, advertising design, code authoring, or UI design work. These require a separate Charter.",
+    ),
+    Clause(
+        id="C-003",
+        type="approval_required",
+        text="Any handling of customer personally identifiable information (name + bank/tax/income combinations) requires explicit principal approval per session.",
+    ),
+    Clause(
+        id="C-004",
+        type="approval_required",
+        text="Any destructive action on production data --DROP, DELETE, TRUNCATE, or backup deletion --requires explicit human approval.",
+    ),
+    Clause(
+        id="C-005",
+        type="operational_limit",
+        text="Operational window is Monday to Friday, 09:00-18:00 America/New_York. Per-task budget cap is USD 0.50.",
+    ),
+    Clause(
+        id="C-006",
+        type="data_handling",
+        text="May process customer tax filings, tax IDs, bank statements, and income records. Must not share with third parties, must not persist after task completion.",
+    ),
+    Clause(
+        id="C-007",
+        type="style",
+        text="Prefer structured output (JSON or Markdown table). Cite sources for factual claims. Respond in English or Chinese.",
+    ),
 ]
 
 ALICE_SUMMARY = (
@@ -73,20 +89,41 @@ ALICE_SUMMARY = (
 )
 
 BOB_CLAUSES = [
-    Clause(id="C-001", type="scope",
-        text="This agent acts for Bob's coding, debugging, refactoring, technical documentation, code review, and technology evaluation work."),
-    Clause(id="C-002", type="out_of_scope",
-        text="Do not accept tax filing, bookkeeping, marketing copy, or personal financial advice."),
-    Clause(id="C-003", type="approval_required",
-        text="Any deployment to production environments requires explicit principal approval."),
-    Clause(id="C-004", type="approval_required",
-        text="Any destructive database action --DROP TABLE, deletion of database tables, or deletion of production backups --requires explicit principal approval."),
-    Clause(id="C-005", type="approval_required",
-        text="Committing code containing secrets (API keys, credentials, tokens) requires explicit principal approval and review."),
-    Clause(id="C-006", type="data_handling",
-        text="May access source code, internal API keys, customer email lists, and operational metrics. Must not commit to public repos; must not send to third-party LLM services; must not dump to log files."),
-    Clause(id="C-007", type="style",
-        text="Code blocks first, explanations after. Respond in English. Concise, no pleasantries."),
+    Clause(
+        id="C-001",
+        type="scope",
+        text="This agent acts for Bob's coding, debugging, refactoring, technical documentation, code review, and technology evaluation work.",
+    ),
+    Clause(
+        id="C-002",
+        type="out_of_scope",
+        text="Do not accept tax filing, bookkeeping, marketing copy, or personal financial advice.",
+    ),
+    Clause(
+        id="C-003",
+        type="approval_required",
+        text="Any deployment to production environments requires explicit principal approval.",
+    ),
+    Clause(
+        id="C-004",
+        type="approval_required",
+        text="Any destructive database action --DROP TABLE, deletion of database tables, or deletion of production backups --requires explicit principal approval.",
+    ),
+    Clause(
+        id="C-005",
+        type="approval_required",
+        text="Committing code containing secrets (API keys, credentials, tokens) requires explicit principal approval and review.",
+    ),
+    Clause(
+        id="C-006",
+        type="data_handling",
+        text="May access source code, internal API keys, customer email lists, and operational metrics. Must not commit to public repos; must not send to third-party LLM services; must not dump to log files.",
+    ),
+    Clause(
+        id="C-007",
+        type="style",
+        text="Code blocks first, explanations after. Respond in English. Concise, no pleasantries.",
+    ),
 ]
 
 BOB_SUMMARY = (
@@ -107,6 +144,7 @@ SEED_BUNDLES = {
 # Build + sign + save (same path as charter.projection.project)
 # ---------------------------------------------------------------------------
 
+
 def seed_from_profile(profile_path: Path) -> Charter:
     profile, raw = load_profile(profile_path)
 
@@ -121,14 +159,11 @@ def seed_from_profile(profile_path: Path) -> Charter:
     private_key = ensure_issuer_key(profile.principal.id)
     public_key_str = public_key_to_string(private_key.public_key())
 
-    now = datetime.now(timezone.utc).replace(microsecond=0)
+    now = datetime.now(UTC).replace(microsecond=0)
     valid_until = now + timedelta(days=profile.lifecycle.valid_days)
 
     charter = Charter(
-        charter_id=(
-            f"charter:{profile.principal.id}:{profile.agent.id}:"
-            f"{now.date().isoformat()}"
-        ),
+        charter_id=(f"charter:{profile.principal.id}:{profile.agent.id}:{now.date().isoformat()}"),
         binding=Binding(
             principal_id=profile.principal.id,
             agent_id=profile.agent.id,
@@ -166,8 +201,8 @@ def seed_from_profile(profile_path: Path) -> Charter:
     path = save_charter(charter)
 
     print(f"[1/3] Loaded:    {profile_path}  ->  {profile.principal.id}")
-    print(f"[2/3] Projected: hand-curated ({len(clauses)} clauses)  [SEED MODE, no LLM]")
-    print(f"[3/3] Signed:    ed25519, public key embedded in provenance")
+    print(f"[2/3] Projected: {len(clauses)} clauses (seeded, no LLM call)")
+    print("[3/3] Signed:    ed25519, public key embedded in provenance")
     print()
     print("[OK] Charter active")
     print(f"  charter_id:  {charter.charter_id}")

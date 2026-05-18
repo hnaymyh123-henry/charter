@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "charter": {
+      "command": "charter-mcp",
+      "args": [],
+      "env": {
+        "CHARTER_URL_BASE": "http://localhost:8000",
+        "CHARTER_DATA_DIR": "./data"
+      }
+    }
+  }
+}

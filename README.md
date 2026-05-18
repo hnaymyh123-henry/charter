@@ -1,96 +1,142 @@
 # Charter
 
-> Agent 经济的雇佣合同 — Authority 层
-> v0 hackathon demo, 2026-05-17
+> The Authority layer between Agent Card (capability) and AP2 Mandate
+> (per-task authorization) — a signed, queryable work contract that lets
+> calling agents check "can I delegate this to that agent under this
+> principal?" *before* the task runs.
 
-Charter is the missing layer between **Capability** (Agent Card) and
-**Authorization** (AP2 Mandate): it answers _"this agent acts for whom, under
-what continuing constraints?"_
+Charter answers the question every existing agent protocol leaves blank:
 
-See `Charter-黑客松项目文档.md` for the full design and `CONTEXT.md` for the
-glossary.
+> _"This agent acts for whom, under what continuing constraints?"_
+
+`Agent Card` says what an agent *can do* (its résumé). `AP2 Mandate` says
+what a user *authorized for this transaction*. Charter says what the agent
+*may do under a given principal* (the employment contract). One agent, many
+Charters, one per principal — same binary, different boundaries.
+
+**Docs:**
+
+- **[`docs/spec.md`](docs/spec.md)** — protocol contract: schema, decision rules, lifecycle, MCP tool signatures.
+- **[`docs/design.md`](docs/design.md)** — design rationale and tradeoffs (ADR-style).
+- **[`CONTEXT.md`](CONTEXT.md)** — protocol glossary.
+- **[`ROADMAP.md`](ROADMAP.md)** — prioritized work for upcoming iterations.
+- **[`docs/legacy/hackathon-design.md`](docs/legacy/hackathon-design.md)** — original hackathon design doc, kept for historical reference.
 
 ---
 
-## Quick start (local, 3-minute demo)
+## Install
 
-### 1. Install
+`uv` is the recommended toolchain:
 
 ```bash
-# uv recommended (装包秒级):
 uv venv
 uv pip install -e .
+```
 
-# Or plain pip:
+Or with plain pip:
+
+```bash
 python -m venv .venv
-source .venv/bin/activate     # Windows: .venv\Scripts\activate
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e .
 ```
 
-### 2. Configure
+You'll get three console scripts on your `PATH`: `charter`, `charter-mcp`,
+`charter-server`.
+
+## Configure
 
 ```bash
 cp .env.example .env
-# Edit .env and paste your Anthropic API key:
+# Edit .env and set:
 #   ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-### 3. Issue two Charters (one underlying agent, two principals)
+The `ANTHROPIC_API_KEY` is only needed to **issue** new Charters (the
+projection step calls Claude once to expand a profile into clauses).
+**Fetching, verifying, and aggregating** verdicts requires no API key —
+the MCP server itself makes zero LLM calls at runtime.
+
+Override defaults with environment variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CHARTER_URL_BASE` | `http://localhost:8000` | Public base URL where Charters are hosted |
+| `CHARTER_DATA_DIR` | `./data` | Where Charters and issuer keys live on disk |
+| `CHARTER_MODEL` | `claude-sonnet-4-6` | Anthropic model used by `charter issue` |
+| `CHARTER_PORT` | `8000` | Port for `charter-server` |
+
+## Issue a Charter from a profile
+
+Each principal writes a single YAML file describing scope, exclusions,
+approval-required actions, data handling, operational limits, and style.
+Examples live in [`profiles/`](profiles/).
 
 ```bash
 charter issue profiles/alice.yaml
 charter issue profiles/bob.yaml
 ```
 
-You should see two `✓ Charter active` lines with different `charter_url`s.
+Each `charter issue` call runs projection (one LLM call), signs with the
+issuer's Ed25519 key (auto-generated on first issue), and saves the Charter
+to `data/charters/`.
 
-### 4. Start the host
+## Host the Charters
 
 ```bash
 charter-server
 # Listens on http://localhost:8000
 ```
 
-Open in a browser:
+Endpoints:
 
-  - http://localhost:8000/                                  — index of all Charters
-  - http://localhost:8000/alice@acme.com/research_agent_v1  — Alice's Charter JSON
-  - http://localhost:8000/bob@startup.io/research_agent_v1  — Bob's Charter JSON
+  - `GET /`                                      — index of all hosted Charters
+  - `GET /<principal_id>/<agent_id>`             — Public Charter JSON
+  - `GET /api/lookup?principal_id=…&agent_id=…`  — directory resolution
 
-### 5. Inspect from the CLI
+## Inspect from the CLI
 
 ```bash
-charter inspect alice@acme.com research_agent_v1
-charter inspect bob@startup.io research_agent_v1
+charter inspect <principal_id> <agent_id>
 ```
 
-### 6. Plug into Claude Code
+## Use from a calling agent (MCP)
 
-Add to `~/.claude/mcp_servers.json` (or your project's MCP config):
+Any MCP-capable client (Claude Code, Codex CLI, Cursor, custom agents…)
+can connect to the `charter` MCP server:
 
 ```json
 {
   "mcpServers": {
     "charter": {
-      "command": "charter-mcp"
+      "command": "charter-mcp",
+      "env": {
+        "CHARTER_URL_BASE": "http://localhost:8000",
+        "CHARTER_DATA_DIR": "./data"
+      }
     }
   }
 }
 ```
 
-Then in Claude Code, ask:
+This exposes six tools:
 
-  - _"Use the charter MCP to fetch http://localhost:8000/alice@acme.com/research_agent_v1, then check whether I should write a React component."_
-  - _"Now check the same task against http://localhost:8000/bob@startup.io/research_agent_v1."_
-  - _"Try `DROP TABLE acme_invoices_2023` against Bob's Charter."_
-
-Each call hits one of the three MCP tools:
-
-| Tool | Purpose | LLM calls |
+| Tool | Purpose | LLM calls inside the tool |
 |---|---|---|
-| `fetch_charter(url)` | Pull + verify signature | 0 |
-| `check_compatibility(url, task)` | Per-clause hit grading + protocol aggregation | 1 |
-| `propose_within_scope(url, task, verdict)` | Single-shot in-scope rewrite (no loopback in v0) | 1 |
+| `fetch_charter(url)` | Pull + verify signature, return Charter + protocol hints | 0 |
+| `aggregate_verdict(charter, hits)` | Deterministically combine per-clause judgments into a Verdict | 0 |
+| `delegate_task(principal, agent, task)` | Calling agent → write task to inbox | 0 |
+| `check_inbox()` | Worker agent → read pending task | 0 |
+| `send_result(task_id, verdict, …)` | Worker agent → write reply to outbox | 0 |
+| `read_outbox()` | Calling agent → read worker's reply | 0 |
+
+The protocol's central design choice: **the LLM judgment lives in the
+calling agent, not in the Charter server.** The server only fetches,
+verifies, and aggregates — making it stateless, low-cost, and auditable.
+
+See [`AGENTS.md`](AGENTS.md) for the 5-step loop that worker agents follow
+under the protocol, and [`docs/CODEX_SETUP.md`](docs/CODEX_SETUP.md) for
+a concrete local wiring example with Codex CLI + Claude Code.
 
 ---
 
@@ -98,43 +144,64 @@ Each call hits one of the three MCP tools:
 
 ```
 agent contract/
-├── CONTEXT.md
-├── Charter-黑客松项目文档.md
-├── profiles/                       # demo principals
-│   ├── alice.yaml
-│   └── bob.yaml
-├── charter/
-│   ├── constants.py                # TYPE_TO_DECISION protocol map
-│   ├── schema.py                   # Pydantic models
-│   ├── prompts.py                  # LLM system prompts
-│   ├── projection.py               # profile.yaml -> Charter (1 LLM call)
-│   ├── signing.py                  # Ed25519 + Self-Attesting
-│   ├── storage.py                  # JSON / PEM file I/O
-│   ├── server.py                   # FastAPI host
-│   ├── mcp_server.py               # fastmcp 3 tools
-│   └── cli.py                      # `charter issue` / `charter inspect`
-├── data/                           # runtime-generated, git-ignored
-│   ├── charters/*.json
-│   └── keys/*.pem
-└── tests/test_smoke.py
+├── CONTEXT.md                          protocol glossary
+├── AGENTS.md                           worker-agent instructions (Codex / Claude Code)
+├── README.md                           this file
+├── ROADMAP.md                          prioritized next work
+├── LICENSE                             Apache 2.0
+├── Dockerfile                          multi-stage image; `charter-server` as CMD
+├── fly.toml                            fly.io deployment template
+├── .github/workflows/ci.yml            lint + mypy + pytest matrix
+├── docs/
+│   ├── spec.md                         protocol contract
+│   ├── design.md                       design rationale
+│   ├── CODEX_SETUP.md                  local MCP wiring example
+│   └── legacy/
+│       └── hackathon-design.md         original hackathon design doc
+├── profiles/                           example principal profiles
+├── charter/                            Python package
+│   ├── constants.py                    protocol constants (TYPE_TO_DECISION, precedence)
+│   ├── errors.py                       typed exception hierarchy
+│   ├── schema.py                       Pydantic models
+│   ├── prompts.py                      LLM system prompt for projection
+│   ├── projection.py                   profile.yaml -> Charter (1 LLM call)
+│   ├── signing.py                      Ed25519 + Self-Attesting Charter
+│   ├── storage.py                      JSON / PEM file I/O
+│   ├── server.py                       FastAPI host (incl. /healthz + .well-known)
+│   ├── mcp_server.py                   MCP server with 6 tools
+│   └── cli.py                          charter issue / charter inspect
+├── scripts/
+│   └── seed_demo.py                    seed Charters without an LLM call
+├── tests/
+│   ├── test_smoke.py                   protocol-layer + sign/verify roundtrip
+│   ├── test_errors.py                  typed-exception paths
+│   └── test_server.py                  FastAPI route coverage
+└── data/                               runtime-generated, git-ignored
 ```
 
----
+## What this implementation does not do yet
 
-## What's deliberately out of scope for v0
+See [`ROADMAP.md`](ROADMAP.md) for the prioritized post-v0 work. Highlights
+of what's still ahead:
 
-See _§ 16. v0 实施范围速查表_ in `Charter-黑客松项目文档.md` for the full
-40-decision breakdown. Highlights:
+- **`propose_within_scope` MCP tool** — designed, not yet implemented (v0.6)
+- **`charter revoke` / `charter renew` CLI commands** — schema supports them; CLI does not (v0.6)
+- **Loopback verification for rewrites** (v0.6)
+- **`resolve_charter_url` SDK helper** (v0.6)
+- **Encrypted private keys at rest** (v0.6)
+- **JWKS endpoint, key-fingerprint pinning, transparency log** — beyond Self-Attesting v0 trust (v0.8+)
+- **Charter Chain attenuation** — multi-hop delegation with `B ⊆ A` enforcement (v0.7)
+- **Framework SDK adapters** (LangGraph, OpenAI Agents, CrewAI) — first one in v0.7
+- **Web Bot Auth / AP2 integration** (v0.8+)
 
-- **No loopback verification or retry inside `propose_within_scope`.** v0 returns the first LLM rewrite as-is.
-- **No `.well-known` self-hosted mode.** Profile points at the local SaaS host.
-- **No `charter revoke` / `charter renew` CLI commands.** Schema supports them, CLI does not.
-- **No `service_attestation` second-layer signature.** HTTPS + self-attesting key is the entire trust model.
-- **No JWKS endpoint, no TOFU pinning, no transparency log.** All listed as v0+ in §14.
-- **No Charter Chain attenuation.** Demo Act 2 is single-Charter check only.
+What's done in v0.5 (this iteration): Apache 2.0 license, typed exceptions
+(`charter.errors`), `.well-known/charter/{agent_id}` self-hosted mode,
+`/healthz` endpoint, Dockerfile + fly.toml deployment template, ruff +
+mypy --strict in CI on `{py3.12, py3.13} × {ubuntu, macos, windows}`, and
+the doc split (`docs/spec.md` + `docs/design.md`).
 
 ---
 
 ## License
 
-Hackathon prototype. No license declared yet.
+Apache License 2.0. See [`LICENSE`](LICENSE).

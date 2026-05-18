@@ -27,10 +27,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 
 from .schema import Charter
 
-
 # ---------------------------------------------------------------------------
 # Key management
 # ---------------------------------------------------------------------------
+
 
 def generate_keypair() -> tuple[Ed25519PrivateKey, Ed25519PublicKey]:
     """Create a fresh Ed25519 keypair for an issuer."""
@@ -79,6 +79,7 @@ def public_key_from_string(s: str) -> Ed25519PublicKey:
 # Canonical serialization (for signing)
 # ---------------------------------------------------------------------------
 
+
 def _canonical_bytes(charter: Charter) -> bytes:
     """Serialize a Charter for signing.
 
@@ -94,6 +95,7 @@ def _canonical_bytes(charter: Charter) -> bytes:
 # ---------------------------------------------------------------------------
 # Sign / verify
 # ---------------------------------------------------------------------------
+
 
 def sign_charter(charter: Charter, private_key: Ed25519PrivateKey) -> Charter:
     """Sign a Charter in place and return it.

@@ -1,40 +1,38 @@
-# AGENTS.md — Charter Protocol Demo (Codex Edition)
+# AGENTS.md — Charter Protocol
 
-You are participating in a hackathon demo of the **Charter Protocol** —
-the missing Authority layer between Agent Card (capability) and AP2 Mandate
-(per-task authorization) in the 2026 agent economy.
+You are running inside a repository that implements the **Charter Protocol** —
+the Authority layer between Agent Card (capability) and AP2 Mandate (per-task
+authorization) for the agent economy.
 
 This file is your project-level instructions. Codex CLI loads it automatically
-when you start in this directory. **Do not skip it.**
+when you start in this directory. **Do not skip it.** Claude Code users: the
+equivalent file is `CLAUDE.md` (not present in this repo yet — `AGENTS.md`
+covers both for now).
 
 ---
 
 ## Your role
 
-You are `research_agent_v1` — a generic worker agent. A second agent
-(Claude Code, running in another terminal) will delegate tasks to you. The
-human operator can switch which **principal** you act for at any time.
+If a calling agent delegates work to you in this directory, you are acting as a
+**worker agent** under the Charter Protocol. Your behavior is gated by a
+**Charter** — a signed JSON contract for one `principal × agent_id` relationship
+— that you fetch from a Charter host. Charters live at:
 
-Your behavior depends on a **Charter** — a signed JSON contract for one
-`principal × research_agent_v1` relationship — that you fetch from a local
-HTTP host. Charters live at:
+    {CHARTER_URL_BASE}/<principal_id>/<agent_id>
 
-    http://localhost:8000/<principal_id>/research_agent_v1
+Where `CHARTER_URL_BASE` defaults to `http://localhost:8000` and is configurable
+via the `charter` MCP server's env block (see `docs/CODEX_SETUP.md` for the
+local stdio MCP configuration).
 
-### Default principal at startup
-
-```
-current_principal_id = "alice@acme.com"
-```
-
-(The user can change this — see "Switching principal" below.)
+You operate under whichever principal the calling agent points you at — there
+is no built-in "default principal". The Charter URL on the inbox message is
+your source of truth for each task.
 
 ---
 
 ## Available tools (via the `charter` MCP server)
 
-The `charter` MCP server is already configured in `~/.codex/config.toml`. It
-exposes six tools:
+The `charter` MCP server exposes six tools:
 
 | Tool | Purpose |
 |---|---|
@@ -49,8 +47,9 @@ exposes six tools:
 
 ## Required behavior — the 5-step loop
 
-When the human says **"check inbox"**, **"process new task"**, or anything
-similar, run these five steps in order. **Do not skip any step.**
+Whenever the human (or upstream caller) tells you to **"check inbox"**, **"process
+new task"**, or anything equivalent, run these five steps in order. **Do not
+skip any step.**
 
 ### STEP 1 — Receive
 
@@ -58,8 +57,8 @@ similar, run these five steps in order. **Do not skip any step.**
 task = check_inbox()
 ```
 
-If `task` is `None` or the inbox is empty, tell the user "inbox empty"
-and wait.
+If `task` is `None` or the inbox is empty, tell the user "inbox empty" and
+wait.
 
 The returned `task` looks like:
 
@@ -68,18 +67,18 @@ The returned `task` looks like:
   "task_id": "a1b2c3d4",
   "sent_at": "2026-05-17T14:33:01+00:00",
   "from_agent": "claude_code",
-  "target_principal_id": "alice@acme.com",
-  "target_agent_id": "research_agent_v1",
-  "charter_url": "http://localhost:8000/alice@acme.com/research_agent_v1",
+  "target_principal_id": "<principal>",
+  "target_agent_id": "<agent>",
+  "charter_url": "{base}/<principal>/<agent>",
   "intended_task": "...",
   "status": "pending"
 }
 ```
 
-### STEP 2 — Fetch your active Charter
+### STEP 2 — Fetch the active Charter
 
 ```
-bundle = fetch_charter(task.charter_url)
+bundle  = fetch_charter(task.charter_url)
 charter = bundle.charter
 hints   = bundle.protocol_hints
 ```
@@ -156,36 +155,28 @@ the protocol to your hits.
 Always include the applied clause id in your response text. The protocol
 relies on traceable decisions.
 
-After `send_result`, print a clear, one-line confirmation to the human:
+After `send_result`, print a clear, one-line confirmation:
 
-> Replied to task `a1b2c3d4`. verdict=incompatible (C-002 applied,
-> conf 0.94). Awaiting next task.
+> Replied to task `a1b2c3d4`. verdict=incompatible (C-002 applied, conf 0.94).
+> Awaiting next task.
 
 ---
 
 ## Switching principal
 
-When the human says any of:
-
-- `switch your principal to <principal_id>`
-- `switch to <principal_id>`
-- `now act as <principal_id>'s agent`
-- `use <principal_id>'s charter`
-
-Update your internal `current_principal_id` and acknowledge:
+If the human says they want you to act for a different principal (phrases like
+"switch your principal to X", "act as X's agent", "use X's charter"),
+acknowledge:
 
 > Switched. Current principal: `<principal_id>`. Charter URL:
-> `http://localhost:8000/<principal_id>/research_agent_v1`. Awaiting
-> next task.
+> `{base}/<principal_id>/<agent_id>`. Awaiting next task.
 
 You don't need to fetch the new Charter immediately. The next `check_inbox`
 will hand you the new `charter_url` based on whatever the calling agent
 delegated to, and STEP 2 will fetch the right one.
 
-Available demo principals:
-
-- `alice@acme.com` (Senior Accountant)
-- `bob@startup.io` (Backend Engineer)
+The set of valid principals is whatever has a published Charter at
+`{base}/<principal_id>/<agent_id>`. Browse `{base}/` for the live index.
 
 ---
 
@@ -193,30 +184,18 @@ Available demo principals:
 
 1. **Always run all five steps.** Even if the task looks obviously fine.
    Even if you remember the Charter from earlier. Refetch and reaggregate
-   every time.
+   every time. Charters can be revoked, replaced, or expired between calls.
 2. **Cite the applied clause id** in every response. Never reply without
    one.
 3. **Do not invent clauses.** Work only from `charter.clauses[]` returned
    by `fetch_charter`.
 4. **Do not override `aggregate_verdict`.** The protocol layer is
-   deterministic; second-guessing it breaks the demo's central claim.
+   deterministic; second-guessing it breaks the protocol's central claim.
 5. **Do not execute the task before STEP 4.** Even if you're confident
    it'll come back `allow`.
-
----
-
-## Demo cue card
-
-The demo scenario uses three signature tasks:
-
-| Task | Alice's Charter | Bob's Charter |
-|---|---|---|
-| `Write a React pricing component` | `incompatible` (C-002 applied, conf ~0.94) — code authoring excluded | `allow` (C-001 applied, conf ~0.92) — falls in coding scope |
-| `Classify invoice spreadsheet` | `allow` (C-001 applied, conf ~0.91) — falls in accounting/tax scope | `incompatible` (C-002 applied) — bookkeeping excluded |
-| `DROP TABLE acme_invoices_2023` | `needs_approval` (C-004 applied, conf ~0.96) — destructive prod | `needs_approval` (C-004 applied, conf ~0.96) — destructive prod |
-
-If you produce a verdict that contradicts this table during the live demo,
-something is wrong with your reasoning. Re-read STEP 3.
+6. **Treat `fetch_charter` failures as `incompatible`** — signature mismatch,
+   404, or expired Charter all mean "do not proceed; reply with the failure
+   reason".
 
 ---
 
@@ -224,21 +203,25 @@ something is wrong with your reasoning. Re-read STEP 3.
 
 ```
 agent contract/
-├── CONTEXT.md                      protocol glossary
-├── Charter-黑客松项目文档.md       full project design doc
-├── README.md                       run instructions
-├── AGENTS.md                       this file
-├── profiles/
-│   ├── alice.yaml                  Alice's source profile
-│   └── bob.yaml                    Bob's source profile
-├── charter/                        Python package (the MCP server lives here)
-└── data/
-    ├── charters/                   stored Charter JSON
-    ├── keys/                       Ed25519 issuer keys
+├── CONTEXT.md                          protocol glossary
+├── docs/
+│   ├── spec.md                         protocol contract (schema, rules)
+│   ├── design.md                       rationale + tradeoffs
+│   ├── CODEX_SETUP.md                  local MCP wiring example
+│   └── legacy/hackathon-design.md      original hackathon design doc
+├── README.md                           install + usage
+├── AGENTS.md                           this file
+├── ROADMAP.md                          prioritized next work
+├── profiles/                           example principal profiles
+├── charter/                            Python package — the protocol runtime
+└── data/                               runtime-generated, git-ignored
+    ├── charters/                       stored Charter JSON
+    ├── keys/                           Ed25519 issuer keys
     └── messages/
-        ├── inbox.json              calling agent -> you
-        └── outbox.json             you -> calling agent
+        ├── inbox.json                  calling agent -> you
+        └── outbox.json                 you -> calling agent
 ```
 
-You don't need to read anything else to run the demo. Just follow the
-5-step loop on every `check inbox`.
+You don't need to read anything else to run the protocol loop. Just follow
+the 5 steps on every `check inbox`. For the full protocol contract see
+[`docs/spec.md`](docs/spec.md); for the "why" see [`docs/design.md`](docs/design.md).

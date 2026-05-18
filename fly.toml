@@ -1,0 +1,47 @@
+# fly.io deployment template for the Charter server.
+#
+# Customize before first deploy:
+#   1. `fly launch --copy-config --no-deploy`  (claims the app name)
+#   2. Edit `app = "..."` below to whatever fly assigns / you choose.
+#   3. `fly volumes create charter_data --size 1`  (persistent Charter + key store)
+#   4. (Optional) `fly secrets set CHARTER_URL_BASE=https://<your-app>.fly.dev`
+#   5. `fly deploy`
+
+app = "charter-example"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # Override per-deploy via `fly secrets set CHARTER_URL_BASE=...`
+  CHARTER_PORT     = "8000"
+  CHARTER_DATA_DIR = "/data"
+
+[[services]]
+  internal_port = 8000
+  protocol      = "tcp"
+  auto_stop_machines  = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[services.ports]]
+    handlers   = ["http"]
+    port       = 80
+    force_https = true
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port     = 443
+
+  [[services.http_checks]]
+    interval = "30s"
+    timeout  = "5s"
+    grace_period = "10s"
+    method   = "get"
+    path     = "/healthz"
+    protocol = "http"
+
+[[mounts]]
+  source      = "charter_data"
+  destination = "/data"
