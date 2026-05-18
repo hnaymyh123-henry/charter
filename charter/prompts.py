@@ -1,13 +1,16 @@
 """LLM prompt templates.
 
-Only PROJECTION_SYSTEM is used at runtime — by `charter issue` to convert a
-profile.yaml into a Charter draft via one Anthropic API call.
+PROJECTION_SYSTEM is used by `charter issue` to convert a profile.yaml into
+a Charter draft via one Anthropic API call.
 
-The earlier COMPATIBILITY_SYSTEM and PROPOSE_SYSTEM prompts were removed
-when we moved the LLM-judgment responsibility from the charter MCP server
-back into the calling agent's own LLM (§P1-6 / §P2-11 alignment). The MCP
-server no longer makes any LLM call at runtime; see charter/mcp_server.py
-docstring.
+PROPOSE_SYSTEM is used by the `propose_within_scope` MCP tool to rewrite
+an out-of-scope task into a nearby in-scope alternative.
+
+The earlier COMPATIBILITY_SYSTEM prompt was removed when we moved the
+per-clause hit-grading responsibility from the charter MCP server into the
+calling agent's own LLM. `aggregate_verdict` makes no LLM call; only
+`fetch_charter` (zero) and `propose_within_scope` (one) involve the MCP
+server's own API key.
 """
 
 PROJECTION_SYSTEM = """\
@@ -44,6 +47,48 @@ Return ONLY a JSON object with this shape:
   ],
   "summary_plain_language": "..."
 }
+
+Do not include any markdown fences, prose, or explanations outside the JSON.
+"""
+
+
+PROPOSE_SYSTEM = """\
+You are Charter Scope Rewrite Engine.
+
+You will receive:
+  - A signed Charter (clauses + summary + binding metadata).
+  - An `intended_task` that a calling agent wanted to delegate to this
+    Charter's agent.
+  - A `failed_verdict` showing which clauses caused the task to be judged
+    `incompatible` and why.
+
+Your job: produce a *nearby* task that the same agent CAN do under this
+Charter — one that fits an existing `scope` clause and avoids the
+out_of_scope / approval_required clauses that the original task hit. Stay
+close to the original task's intent; do not invent unrelated work.
+
+Hard rules:
+  - The rewrite MUST fit at least one `scope` clause in `charter.clauses[]`.
+  - The rewrite MUST NOT plausibly hit any `out_of_scope` clause.
+  - Do not invent capabilities or domains not declared in the Charter.
+  - Do not propose tasks that require `approval_required` clauses; if you
+    cannot avoid one, set `remaining_approval_needed: true` and name the
+    clause in `referenced_clauses[]`.
+  - If you genuinely cannot produce a viable rewrite within the Charter,
+    return `null` (literal JSON null) instead of guessing.
+
+Return ONLY a JSON object with this shape:
+
+{
+  "rewritten_task": "string -- the in-scope task description",
+  "why_in_scope": "string -- one short sentence citing the scope clause(s) it satisfies and the out_of_scope clause(s) it avoids",
+  "referenced_clauses": ["C-001", "C-002", ...],
+  "remaining_approval_needed": false
+}
+
+Or, if no rewrite is feasible:
+
+null
 
 Do not include any markdown fences, prose, or explanations outside the JSON.
 """

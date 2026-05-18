@@ -441,6 +441,60 @@ def read_outbox() -> dict[str, Any] | None:
 
 
 # ---------------------------------------------------------------------------
+# Tool 7: propose_within_scope (protocol layer; one LLM call)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def propose_within_scope(
+    charter_url: str,
+    intended_task: str,
+    failed_verdict: dict[str, Any],
+) -> dict[str, Any]:
+    """Suggest an in-scope rewrite of a task that failed compatibility check.
+
+    Call this only when `aggregate_verdict` returned
+    `decision=incompatible` AND `rewrite_available=true`. Given the same
+    Charter, the original task, and the failed Verdict, this returns a
+    nearby task that DOES fit the Charter's scope.
+
+    This tool makes one LLM call (the only LLM call any charter MCP tool
+    makes). The single-shot path is what this iteration ships; loopback
+    verification with retry will wrap this in a future iteration.
+
+    Args:
+        charter_url:    The same URL that was passed to `fetch_charter`.
+        intended_task:  The original natural-language task description.
+        failed_verdict: The Verdict dict returned by `aggregate_verdict`.
+
+    Returns:
+        On success: {"ok": true, "proposal": {<RewriteProposal fields>}}.
+        On no-rewrite-feasible: {"ok": false, "reason": "no viable rewrite"}.
+        On missing API key:     {"ok": false, "reason": "no LLM configured"}.
+    """
+    from .propose import propose_within_scope_llm
+    from .schema import Verdict
+
+    try:
+        verdict = Verdict.model_validate(failed_verdict)
+    except Exception as e:
+        return {"ok": False, "reason": f"failed_verdict is not a valid Verdict: {e}"}
+
+    charter = _fetch_and_verify(charter_url)
+
+    try:
+        proposal = propose_within_scope_llm(charter, intended_task, verdict)
+    except RuntimeError as e:
+        # Missing API key — surface a clean degraded response.
+        return {"ok": False, "reason": str(e)}
+
+    if proposal is None:
+        return {"ok": False, "reason": "no viable rewrite within Charter scope"}
+
+    return {"ok": True, "proposal": proposal.model_dump(mode="json")}
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
