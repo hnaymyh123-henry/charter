@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -35,10 +35,10 @@ from .schema import (
 )
 from .signing import public_key_to_string
 
-
 # ---------------------------------------------------------------------------
 # Profile loading
 # ---------------------------------------------------------------------------
+
 
 def load_profile(path: Path) -> tuple[Profile, str]:
     """Load and validate a profile.yaml. Returns (Profile, raw_text)."""
@@ -55,6 +55,7 @@ def _hash_profile(raw: str) -> str:
 # ---------------------------------------------------------------------------
 # LLM projection
 # ---------------------------------------------------------------------------
+
 
 def _project_clauses_via_llm(profile: Profile) -> tuple[list[Clause], str]:
     """Call Claude to expand the profile into clauses + summary."""
@@ -80,7 +81,7 @@ def _project_clauses_via_llm(profile: Profile) -> tuple[list[Clause], str]:
     if text.startswith("```"):
         text = text.strip("`")
         if text.startswith("json"):
-            text = text[len("json"):].lstrip()
+            text = text[len("json") :].lstrip()
 
     data: dict[str, Any] = json.loads(text)
     clauses = [Clause.model_validate(c) for c in data["clauses"]]
@@ -92,6 +93,7 @@ def _project_clauses_via_llm(profile: Profile) -> tuple[list[Clause], str]:
 # Build full Charter
 # ---------------------------------------------------------------------------
 
+
 def project(
     profile: Profile,
     profile_raw: str,
@@ -100,16 +102,13 @@ def project(
     """Project a Profile into a fully populated (but unsigned) Charter."""
     clauses, summary_text = _project_clauses_via_llm(profile)
 
-    now = datetime.now(timezone.utc).replace(microsecond=0)
+    now = datetime.now(UTC).replace(microsecond=0)
     issued_at = now
     valid_until = now + timedelta(days=profile.lifecycle.valid_days)
 
     public_key_str = public_key_to_string(issuer_private_key.public_key())
 
-    charter_id = (
-        f"charter:{profile.principal.id}:{profile.agent.id}:"
-        f"{issued_at.date().isoformat()}"
-    )
+    charter_id = f"charter:{profile.principal.id}:{profile.agent.id}:{issued_at.date().isoformat()}"
 
     return Charter(
         charter_id=charter_id,
@@ -143,8 +142,7 @@ def project(
                 SourceCommitment(
                     type="profile_yaml",
                     description=(
-                        f"{profile.principal.id} profile answered on "
-                        f"{issued_at.date().isoformat()}"
+                        f"{profile.principal.id} profile answered on {issued_at.date().isoformat()}"
                     ),
                     content_hash=_hash_profile(profile_raw),
                 )

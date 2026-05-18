@@ -1,9 +1,21 @@
 [project]
 name = "charter"
 version = "0.1.0"
-description = "Charter — agent 经济的雇佣合同（v0 demo, hackathon weekend 2026-05-17）"
+description = "Charter — the Authority layer between Agent Card and AP2 Mandate: signed work contracts for principal × agent relationships."
+readme = "README.md"
+license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
 authors = [{ name = "Henry Ma" }]
+keywords = ["agents", "mcp", "authorization", "delegation", "agent-protocol"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = [
     "pydantic>=2.0",
     "fastapi>=0.115",
@@ -21,6 +33,8 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+    "mypy>=1.10",
 ]
 
 [project.scripts]
@@ -34,3 +48,34 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["charter"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# Curated rule set: standard pyflakes/pycodestyle/pyupgrade/import-sorting +
+# bugbear for foot-guns. Skip overly-opinionated families (D, ANN, S) for now.
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM", "RET"]
+ignore = [
+    "E501",  # line length is handled by the formatter
+    "B008",  # `Depends(...)` as a default value is idiomatic FastAPI
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*"   = ["B011"]   # asserts in tests are fine
+"scripts/*" = ["E402"]   # sys.path setup before charter imports is intentional
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["charter"]
+# Strict mode catches the realistic backlog without being absurd about
+# untyped third-party libs.
+ignore_missing_imports = true
+disallow_untyped_decorators = false
+warn_return_any = true

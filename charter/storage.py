@@ -15,10 +15,8 @@ A `data/charters/index.json` directory file maps
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
-from typing import Optional
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -26,10 +24,10 @@ from .constants import DEFAULT_DATA_DIR
 from .schema import Charter
 from .signing import generate_keypair, load_private_key, save_private_key
 
-
 # ---------------------------------------------------------------------------
 # Path helpers
 # ---------------------------------------------------------------------------
+
 
 def data_root() -> Path:
     return Path(os.environ.get("CHARTER_DATA_DIR", DEFAULT_DATA_DIR))
@@ -64,6 +62,7 @@ def key_path(principal_id: str) -> Path:
 # Charter I/O
 # ---------------------------------------------------------------------------
 
+
 def save_charter(charter: Charter) -> Path:
     """Write a Charter JSON to disk. Returns the path written."""
     path = charter_path(charter.binding.principal_id, charter.binding.agent_id)
@@ -71,7 +70,7 @@ def save_charter(charter: Charter) -> Path:
     return path
 
 
-def load_charter(principal_id: str, agent_id: str) -> Optional[Charter]:
+def load_charter(principal_id: str, agent_id: str) -> Charter | None:
     """Load a Charter by binding, or None if not found."""
     path = charter_path(principal_id, agent_id)
     if not path.exists():
@@ -100,6 +99,7 @@ def list_charters() -> list[Charter]:
 # ---------------------------------------------------------------------------
 # Issuer key I/O (with auto-create-on-demand for demo convenience)
 # ---------------------------------------------------------------------------
+
 
 def ensure_issuer_key(principal_id: str) -> Ed25519PrivateKey:
     """Return the issuer's private key, creating one if absent.

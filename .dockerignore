@@ -1,0 +1,40 @@
+# Source-control & editor noise
+.git
+.gitignore
+.github
+.claude
+.vscode
+.idea
+
+# Python build artifacts
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+dist
+build
+.eggs
+.venv
+venv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.uv-cache
+.uv
+
+# Runtime / secrets — never bake into the image
+.env
+data
+*.pem
+
+# Tests + dev tooling — not needed at runtime
+tests
+scripts
+docs
+walkthrough.html
+*.md
+!README.md
+
+# Per-machine MCP config
+.mcp.json
+.mcp.json.example

@@ -21,6 +21,10 @@ Thumbs.db
 # do not version-control.
 .claude/settings.local.json
 
-# Internal-only design notes (kept locally, not pushed to public repo).
-CONTEXT.md
+# Per-machine MCP config — paths to `charter-mcp` binary and `data/` dir
+# vary by user. The template lives at `.mcp.json.example`.
+.mcp.json
+
+# Top-level hackathon-era design doc lives at `docs/legacy/hackathon-design.md`
+# now. The old top-level copy stays local-only.
 Charter-黑客松项目文档.md

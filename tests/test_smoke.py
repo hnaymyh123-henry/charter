@@ -6,14 +6,16 @@ Run with:
 
 from __future__ import annotations
 
-import json
-import os
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from charter.constants import TYPE_TO_DECISION, aggregate_decision
+from charter.mcp_server import aggregate_verdict as _agg_tool
+from charter.mcp_server import check_inbox as _check_inbox_tool
+from charter.mcp_server import delegate_task as _delegate_tool
+from charter.mcp_server import read_outbox as _read_outbox_tool
+from charter.mcp_server import send_result as _send_result_tool
 from charter.schema import (
     AgentOperator,
     Binding,
@@ -33,21 +35,21 @@ from charter.signing import (
     verify_charter,
 )
 
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
+
 def test_type_to_decision_covers_all_types():
     expected = {
-        "scope":             "allow",
-        "out_of_scope":      "incompatible",
+        "scope": "allow",
+        "out_of_scope": "incompatible",
         "approval_required": "needs_approval",
         "operational_limit": "needs_approval",
-        "style":             "allow",
-        "data_handling":     "needs_approval",
+        "style": "allow",
+        "data_handling": "needs_approval",
     }
-    assert TYPE_TO_DECISION == expected
+    assert expected == TYPE_TO_DECISION
 
 
 def test_aggregate_decision_precedence():
@@ -62,8 +64,9 @@ def test_aggregate_decision_precedence():
 # Sign / verify round-trip
 # ---------------------------------------------------------------------------
 
+
 def _make_minimal_charter(public_key_str: str) -> Charter:
-    now = datetime.now(timezone.utc).replace(microsecond=0)
+    now = datetime.now(UTC).replace(microsecond=0)
     return Charter(
         charter_id="charter:test@example.com:agent_x:2026-05-17",
         binding=Binding(principal_id="test@example.com", agent_id="agent_x"),
@@ -120,22 +123,22 @@ def test_verify_rejects_tampered_charter():
 # aggregate_verdict (MCP protocol layer, no LLM)
 # ---------------------------------------------------------------------------
 
-# Import directly from the module so we test the underlying function, not
-# the FastMCP tool wrapper (which expects an active MCP server context).
-from charter.mcp_server import aggregate_verdict as _agg_tool
+# Note: we import the FastMCP-decorated function under its real name from
+# the top of the file. We invoke the underlying callable directly because
+# the @mcp.tool() decorator expects an active MCP server context.
 
 
 def _alice_like_charter() -> dict:
     """A minimal Charter dict (just the bits aggregate_verdict reads)."""
     return {
         "clauses": [
-            {"id": "C-001", "type": "scope",             "text": "..."},
-            {"id": "C-002", "type": "out_of_scope",      "text": "..."},
+            {"id": "C-001", "type": "scope", "text": "..."},
+            {"id": "C-002", "type": "out_of_scope", "text": "..."},
             {"id": "C-003", "type": "approval_required", "text": "..."},
             {"id": "C-004", "type": "approval_required", "text": "..."},
             {"id": "C-005", "type": "operational_limit", "text": "..."},
-            {"id": "C-006", "type": "data_handling",     "text": "..."},
-            {"id": "C-007", "type": "style",             "text": "..."},
+            {"id": "C-006", "type": "data_handling", "text": "..."},
+            {"id": "C-007", "type": "style", "text": "..."},
         ],
     }
 
@@ -227,7 +230,7 @@ def test_aggregate_verdict_ignores_misses():
     charter = _alice_like_charter()
     hits = [
         {"id": "C-001", "hit": False, "confidence": 0.1, "reason": "not accounting"},
-        {"id": "C-002", "hit": True,  "confidence": 0.94, "reason": "marketing"},
+        {"id": "C-002", "hit": True, "confidence": 0.94, "reason": "marketing"},
     ]
     v = _aggregate(charter, hits)
     assert v["decision"] == "incompatible"
@@ -237,13 +240,6 @@ def test_aggregate_verdict_ignores_misses():
 # ---------------------------------------------------------------------------
 # Inbox / outbox round-trip (delegate_task -> check_inbox -> send_result -> read_outbox)
 # ---------------------------------------------------------------------------
-
-from charter.mcp_server import (
-    check_inbox as _check_inbox_tool,
-    delegate_task as _delegate_tool,
-    read_outbox as _read_outbox_tool,
-    send_result as _send_result_tool,
-)
 
 
 def _call(tool, *args, **kwargs):
@@ -284,8 +280,13 @@ def test_message_roundtrip(temp_data_dir):
     fake_verdict = {
         "decision": "incompatible",
         "matched_clauses": [
-            {"id": "C-002", "local_decision": "incompatible", "applied": True,
-             "confidence": 0.94, "reason": "code authoring excluded"}
+            {
+                "id": "C-002",
+                "local_decision": "incompatible",
+                "applied": True,
+                "confidence": 0.94,
+                "reason": "code authoring excluded",
+            }
         ],
         "reason": "test",
         "rewrite_available": True,
