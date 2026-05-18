@@ -84,9 +84,20 @@ def save_charter(charter: Charter) -> Path:
     binding. Predecessors with `status in {"superseded", "revoked"}` are
     written to the archive via `archive_charter` instead, so the live
     binding path always holds the currently-authoritative Charter.
+
+    Side effect: updates `data/charters/index.json` so
+    `discovery.resolve_charter_url` can resolve this binding locally.
     """
     path = charter_path(charter.binding.principal_id, charter.binding.agent_id)
     path.write_text(charter.model_dump_json(indent=2), encoding="utf-8")
+
+    # Keep the discovery index in sync. Imported lazily so this module
+    # has no circular dependency with charter.discovery (which imports
+    # charters_dir from this module).
+    from .discovery import update_index
+
+    update_index(charter)
+
     return path
 
 
