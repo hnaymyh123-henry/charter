@@ -1,6 +1,6 @@
 [project]
 name = "charter"
-version = "0.1.0"
+version = "0.8.0"
 description = "Charter — the Authority layer between Agent Card and AP2 Mandate: signed work contracts for principal × agent relationships."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -84,3 +84,16 @@ files = ["charter"]
 ignore_missing_imports = true
 disallow_untyped_decorators = false
 warn_return_any = true
+
+# One-command minor / major / patch bumps: `bump-my-version bump minor`.
+# Keeps pyproject.toml's version field as the single source of truth.
+[tool.bumpversion]
+current_version = "0.8.0"
+commit = false
+tag = false
+allow_dirty = true
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+search = "version = \"{current_version}\""
+replace = "version = \"{new_version}\""
