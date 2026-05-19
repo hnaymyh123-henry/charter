@@ -88,6 +88,14 @@ def _signed_charter(*, status: str = "active") -> Charter:
     return charter
 
 
+@pytest.fixture(autouse=True)
+def _isolate_pin_file(tmp_path, monkeypatch):
+    """Each test gets its own pin file so v0.8 fingerprint pinning doesn't
+    bleed across tests (a fresh keypair per test means each `_signed_charter`
+    has a different fingerprint, which would mismatch a stale pin)."""
+    monkeypatch.setenv("CHARTER_PIN_FILE", str(tmp_path / "pins.json"))
+
+
 def _stub_httpx(
     monkeypatch, *, status_code: int = 200, json_payload=None, raise_request_error: bool = False
 ):

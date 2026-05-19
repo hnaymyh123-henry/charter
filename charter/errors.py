@@ -63,6 +63,15 @@ class CharterKeyMismatchError(CharterError):
     Callers should treat as `incompatible`."""
 
 
+class CharterPinMismatchError(CharterError):
+    """A Charter's verifying key does NOT match the previously-pinned
+    fingerprint for this principal. This is the layer that catches a
+    host compromise where the attacker now signs with their own key
+    and rotated the JWKS at the same time. Callers should treat as
+    `incompatible`. After a legitimate key rotation the operator must
+    run `charter pins reset <principal>` to drop the pin."""
+
+
 class JWKSNotFoundError(CharterError):
     """The issuer's `.well-known/jwks.json` endpoint could not be
     reached (404, 5xx, or network error). Raised by `fetch_jwks`."""
@@ -81,6 +90,7 @@ __all__ = [
     "CharterExpiredError",
     "CharterRevokedError",
     "CharterKeyMismatchError",
+    "CharterPinMismatchError",
     "JWKSNotFoundError",
     "JWKSParseError",
 ]

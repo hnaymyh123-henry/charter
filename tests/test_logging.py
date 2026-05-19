@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -161,6 +162,13 @@ def _signed_charter(status: str = "active") -> Charter:
     )
     sign_charter(charter, private)
     return charter
+
+
+@pytest.fixture(autouse=True)
+def _isolate_pin_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each fetch test gets its own pin file. Fresh keypairs per test
+    would otherwise mismatch a pin recorded by an earlier test."""
+    monkeypatch.setenv("CHARTER_PIN_FILE", str(tmp_path / "pins.json"))
 
 
 def _stub_httpx(

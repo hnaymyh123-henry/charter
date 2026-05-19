@@ -306,6 +306,82 @@ def renew(principal_id: str, agent_id: str, valid_days: int | None) -> None:
     click.echo("")
 
 
+@cli.group()
+def pins() -> None:
+    """Inspect or reset issuer-key fingerprint pins (v0.8 trust model).
+
+    Pins live in `data/pins.json` (override with `CHARTER_PIN_FILE`).
+    Each pin records the SHA-256 fingerprint of an issuer's signing key
+    the first time we see it, so a later swap to a different key fires
+    `CharterPinMismatchError` at fetch time. Run `charter pins reset`
+    after a *legitimate* key rotation to authorize the new fingerprint.
+    """
+
+
+@pins.command("list")
+def pins_list() -> None:
+    """Pretty-print the current pin table."""
+    from .pins import list_pins
+
+    table = list_pins()
+    if not table:
+        click.echo("No pins recorded yet.")
+        return
+
+    click.echo("")
+    click.echo(click.style(f"Pinned issuers ({len(table)}):", bold=True))
+    for principal_id, pin in sorted(table.items()):
+        click.echo(f"  {click.style(principal_id, bold=True)}")
+        click.echo(f"    fingerprint:   {pin.fingerprint}")
+        click.echo(f"    first_seen:    {pin.first_seen.isoformat()}")
+        click.echo(f"    last_verified: {pin.last_verified.isoformat()}")
+    click.echo("")
+
+
+@pins.command("reset")
+@click.argument("principal_id")
+@click.option(
+    "-y",
+    "--yes",
+    is_flag=True,
+    default=False,
+    help="Skip the confirmation prompt.",
+)
+def pins_reset(principal_id: str, yes: bool) -> None:
+    """Drop the pin for PRINCIPAL_ID.
+
+    Use this after a legitimate key rotation. The next fetch will
+    establish a fresh pin. Prints the current fingerprint and asks for
+    confirmation unless `--yes` is given.
+
+    Example:
+        charter pins reset alice@acme.com
+    """
+    from .pins import get_pin, reset_pin
+
+    pin = get_pin(principal_id)
+    if pin is None:
+        click.echo(f"No pin recorded for {principal_id}.", err=True)
+        sys.exit(1)
+
+    click.echo("")
+    click.echo(f"  principal:     {principal_id}")
+    click.echo(f"  fingerprint:   {pin.fingerprint}")
+    click.echo(f"  first_seen:    {pin.first_seen.isoformat()}")
+    click.echo(f"  last_verified: {pin.last_verified.isoformat()}")
+    click.echo("")
+
+    if not yes:
+        click.confirm(
+            f"Drop the pin for {principal_id}? Only do this after a LEGITIMATE key rotation.",
+            abort=True,
+        )
+
+    reset_pin(principal_id)
+    click.echo(click.style(f"[OK] Pin dropped for {principal_id}.", fg="yellow", bold=True))
+    click.echo("  The next fetch will establish a fresh pin.")
+
+
 def main() -> None:
     """Console-script entry point: `charter`."""
     cli()

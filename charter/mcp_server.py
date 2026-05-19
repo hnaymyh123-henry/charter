@@ -80,11 +80,13 @@ from .errors import (
     CharterExpiredError,
     CharterKeyMismatchError,
     CharterNotFoundError,
+    CharterPinMismatchError,
     CharterRevokedError,
     CharterSchemaError,
     CharterSignatureError,
 )
 from .keys import fetch_jwks, issuer_origin_from_url, jwk_to_public_key_string
+from .pins import fingerprint_of, get_pin, record_pin, update_last_verified
 from .schema import Charter, MatchedClause, Verdict
 from .signing import verify_charter
 from .storage import data_root
@@ -207,6 +209,10 @@ def _fetch_and_verify(charter_url: str) -> Charter:
     if charter.provenance.issuer_kid is not None:
         _check_jwks_consistency(charter, charter_url, log_ctx)
 
+    # Fingerprint pinning (v0.8+). TOFU on first fetch; mismatch on
+    # subsequent fetches is a hard failure.
+    _check_pin(charter, log_ctx)
+
     status = charter.lifecycle.status
     if status == "revoked":
         _log.warning("fetch returned revoked charter", extra={**log_ctx, "outcome": "revoked"})
@@ -264,6 +270,46 @@ def _check_jwks_consistency(charter: Charter, charter_url: str, log_ctx: dict[st
         raise CharterKeyMismatchError(
             f"Charter inline issuer_public_key disagrees with JWKS for kid={kid!r}"
         )
+
+
+def _check_pin(charter: Charter, log_ctx: dict[str, Any]) -> None:
+    """TOFU-then-pin check against `data/pins.json`.
+
+    Computes the fingerprint of `charter.provenance.issuer_public_key`,
+    then compares against the persisted pin for `charter.binding.principal_id`.
+
+      - No existing pin → record one (TOFU first fetch).
+      - Fingerprint matches → refresh `last_verified` and continue.
+      - Fingerprint differs → raise `CharterPinMismatchError`.
+
+    The pin is keyed by `binding.principal_id`, which is the identity a
+    calling agent cares about ("am I still talking to alice@acme.com?").
+    """
+    principal_id = charter.binding.principal_id
+    current_fp = fingerprint_of(charter.provenance.issuer_public_key)
+
+    pin = get_pin(principal_id)
+    if pin is None:
+        record_pin(principal_id, current_fp)
+        return
+
+    if pin.fingerprint != current_fp:
+        _log.warning(
+            "fetch failed: pin mismatch",
+            extra={
+                **log_ctx,
+                "pinned_fingerprint": pin.fingerprint,
+                "current_fingerprint": current_fp,
+                "outcome": "pin_mismatch",
+            },
+        )
+        raise CharterPinMismatchError(
+            f"Pinned fingerprint for {principal_id!r} is {pin.fingerprint}, "
+            f"current key fingerprints to {current_fp}. Run "
+            f"`charter pins reset {principal_id}` after a legitimate rotation."
+        )
+
+    update_last_verified(principal_id)
 
 
 # ---------------------------------------------------------------------------
