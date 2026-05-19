@@ -78,11 +78,15 @@ from .constants import (
 )
 from .errors import (
     CharterExpiredError,
+    CharterKeyMismatchError,
     CharterNotFoundError,
+    CharterPinMismatchError,
     CharterRevokedError,
     CharterSchemaError,
     CharterSignatureError,
 )
+from .keys import fetch_jwks, issuer_origin_from_url, jwk_to_public_key_string
+from .pins import fingerprint_of, get_pin, record_pin, update_last_verified
 from .schema import Charter, MatchedClause, Verdict
 from .signing import verify_charter
 from .storage import data_root
@@ -130,11 +134,26 @@ def _fetch_and_verify(charter_url: str) -> Charter:
     """Fetch a Charter JSON, parse, verify signature, check lifecycle.
 
     Raises one of `charter.errors.CharterError` subclasses on failure:
-        - `CharterNotFoundError`   — network failure or non-2xx HTTP response
-        - `CharterSchemaError`     — body is not a valid Charter
-        - `CharterSignatureError`  — issuer signature does not verify
-        - `CharterRevokedError`    — `lifecycle.status == "revoked"`
-        - `CharterExpiredError`    — `lifecycle.status in {"expired", "superseded"}`
+        - `CharterNotFoundError`    — network failure or non-2xx HTTP response
+        - `CharterSchemaError`      — body is not a valid Charter
+        - `CharterSignatureError`   — issuer signature does not verify
+        - `CharterKeyMismatchError` — `provenance.issuer_kid` is not the JWKS
+                                      key, or JWKS key disagrees with inline
+                                      `issuer_public_key`
+        - `JWKSNotFoundError`       — Charter has a `kid` but JWKS unreachable
+        - `JWKSParseError`          — Charter has a `kid` but JWKS is malformed
+        - `CharterRevokedError`     — `lifecycle.status == "revoked"`
+        - `CharterExpiredError`     — `lifecycle.status in {"expired", "superseded"}`
+
+    Trust order (v0.8):
+        1. Inline-key signature must verify (covers `kid` since `kid` is in the
+           signed payload — a kid swap breaks this check).
+        2. If Charter carries `issuer_kid`, fetch the issuer's JWKS and
+           confirm the kid is published AND the JWKS key matches the inline
+           `issuer_public_key`. This is what catches a forger who signs with
+           their own key and lies about the issuer.
+        3. Legacy Charters (no `kid`) skip step 2 and keep working under the
+           v0 self-attesting trust model.
 
     Emits exactly one log line per call describing the outcome.
     """
@@ -178,13 +197,23 @@ def _fetch_and_verify(charter_url: str) -> Charter:
         )
         raise CharterSignatureError(f"Bad signature at {charter_url}")
 
-    status = charter.lifecycle.status
     log_ctx = {
         "url": charter_url,
         "charter_id": charter.charter_id,
         "principal_id": charter.binding.principal_id,
         "agent_id": charter.binding.agent_id,
     }
+
+    # JWKS cross-check (v0.8+). Only runs when the Charter carries a kid.
+    # Legacy charters fall back to the v0 self-attesting trust model.
+    if charter.provenance.issuer_kid is not None:
+        _check_jwks_consistency(charter, charter_url, log_ctx)
+
+    # Fingerprint pinning (v0.8+). TOFU on first fetch; mismatch on
+    # subsequent fetches is a hard failure.
+    _check_pin(charter, log_ctx)
+
+    status = charter.lifecycle.status
     if status == "revoked":
         _log.warning("fetch returned revoked charter", extra={**log_ctx, "outcome": "revoked"})
         raise CharterRevokedError(f"Charter status=revoked at {charter_url}")
@@ -197,6 +226,90 @@ def _fetch_and_verify(charter_url: str) -> Charter:
 
     _log.info("fetch ok", extra={**log_ctx, "outcome": "ok"})
     return charter
+
+
+def _check_jwks_consistency(charter: Charter, charter_url: str, log_ctx: dict[str, Any]) -> None:
+    """Confirm `charter.provenance.issuer_kid` matches an entry in the
+    issuer's JWKS and that the JWKS key equals the inline public key.
+
+    Raises:
+        JWKSNotFoundError:        JWKS endpoint unreachable.
+        JWKSParseError:           JWKS body malformed.
+        CharterKeyMismatchError:  kid not in JWKS, or JWKS key != inline key.
+    """
+    kid = charter.provenance.issuer_kid
+    assert kid is not None  # call site guarantees this
+
+    origin = issuer_origin_from_url(charter_url)
+    jwks = fetch_jwks(origin)  # may raise JWKSNotFoundError / JWKSParseError
+
+    jwk = jwks.get(kid)
+    if jwk is None:
+        _log.warning(
+            "fetch failed: kid not in JWKS",
+            extra={**log_ctx, "kid": kid, "outcome": "key_mismatch"},
+        )
+        raise CharterKeyMismatchError(f"Charter kid={kid!r} not present in JWKS at {origin}")
+
+    try:
+        jwks_key_str = jwk_to_public_key_string(jwk)
+    except ValueError as e:
+        _log.warning(
+            "fetch failed: JWKS entry malformed",
+            extra={**log_ctx, "kid": kid, "outcome": "key_mismatch", "error": str(e)},
+        )
+        raise CharterKeyMismatchError(
+            f"JWKS entry for kid={kid!r} is not a valid Ed25519 OKP key: {e}"
+        ) from e
+
+    if jwks_key_str != charter.provenance.issuer_public_key:
+        _log.warning(
+            "fetch failed: JWKS key != inline key",
+            extra={**log_ctx, "kid": kid, "outcome": "key_mismatch"},
+        )
+        raise CharterKeyMismatchError(
+            f"Charter inline issuer_public_key disagrees with JWKS for kid={kid!r}"
+        )
+
+
+def _check_pin(charter: Charter, log_ctx: dict[str, Any]) -> None:
+    """TOFU-then-pin check against `data/pins.json`.
+
+    Computes the fingerprint of `charter.provenance.issuer_public_key`,
+    then compares against the persisted pin for `charter.binding.principal_id`.
+
+      - No existing pin → record one (TOFU first fetch).
+      - Fingerprint matches → refresh `last_verified` and continue.
+      - Fingerprint differs → raise `CharterPinMismatchError`.
+
+    The pin is keyed by `binding.principal_id`, which is the identity a
+    calling agent cares about ("am I still talking to alice@acme.com?").
+    """
+    principal_id = charter.binding.principal_id
+    current_fp = fingerprint_of(charter.provenance.issuer_public_key)
+
+    pin = get_pin(principal_id)
+    if pin is None:
+        record_pin(principal_id, current_fp)
+        return
+
+    if pin.fingerprint != current_fp:
+        _log.warning(
+            "fetch failed: pin mismatch",
+            extra={
+                **log_ctx,
+                "pinned_fingerprint": pin.fingerprint,
+                "current_fingerprint": current_fp,
+                "outcome": "pin_mismatch",
+            },
+        )
+        raise CharterPinMismatchError(
+            f"Pinned fingerprint for {principal_id!r} is {pin.fingerprint}, "
+            f"current key fingerprints to {current_fp}. Run "
+            f"`charter pins reset {principal_id}` after a legitimate rotation."
+        )
+
+    update_last_verified(principal_id)
 
 
 # ---------------------------------------------------------------------------

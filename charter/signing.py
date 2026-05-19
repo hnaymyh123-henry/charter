@@ -33,6 +33,7 @@ and behaves accordingly:
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -155,6 +156,56 @@ def public_key_from_string(s: str) -> Ed25519PublicKey:
 
 
 # ---------------------------------------------------------------------------
+# JWK / kid helpers (v0.8 trust-model upgrade)
+# ---------------------------------------------------------------------------
+
+
+def kid_for_public_key(public_key_str: str) -> str:
+    """Compute a stable JWKS `kid` for an Ed25519 public key.
+
+    Format: first 16 lowercase-hex chars of `sha256(raw_public_key)`.
+    Stable across processes and machines — same key → same `kid`.
+
+    Args:
+        public_key_str: `ed25519:<base64>` form (as it appears in
+            `Charter.provenance.issuer_public_key`).
+
+    Returns:
+        16-char hex string suitable for a JWK `kid` field.
+    """
+    if not public_key_str.startswith("ed25519:"):
+        raise ValueError(f"Expected 'ed25519:<base64>' prefix, got {public_key_str[:32]!r}")
+    raw = base64.b64decode(public_key_str.removeprefix("ed25519:"))
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def public_key_to_jwk(public_key_str: str, *, kid: str | None = None) -> dict[str, str]:
+    """Render an Ed25519 public key as an RFC 7517 JWK dict.
+
+    Args:
+        public_key_str: `ed25519:<base64>` form.
+        kid: Optional override; otherwise derived via `kid_for_public_key`.
+
+    Returns:
+        A JWK dict with `kty="OKP"`, `crv="Ed25519"`, base64url-encoded
+        `x` (raw public-key bytes, no padding), `use="sig"`, `alg="EdDSA"`,
+        and the resolved `kid`.
+    """
+    if not public_key_str.startswith("ed25519:"):
+        raise ValueError(f"Expected 'ed25519:<base64>' prefix, got {public_key_str[:32]!r}")
+    raw = base64.b64decode(public_key_str.removeprefix("ed25519:"))
+    x_b64url = base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+    return {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "kid": kid if kid is not None else kid_for_public_key(public_key_str),
+        "x": x_b64url,
+        "use": "sig",
+        "alg": "EdDSA",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Canonical serialization (for signing)
 # ---------------------------------------------------------------------------
 
@@ -162,12 +213,15 @@ def public_key_from_string(s: str) -> Ed25519PublicKey:
 def _canonical_bytes(charter: Charter) -> bytes:
     """Serialize a Charter for signing.
 
-    The signature field is cleared first to break the self-reference. JSON is
-    written with sorted keys and no whitespace, which is enough for v0; a
-    formal canonical-JSON spec is out of scope (see future work).
+    `issuer_signature` is cleared to break the self-reference, and
+    `transparency_log_id` is cleared because the log entry can only be
+    written AFTER the signature is final (chicken-and-egg). JSON is
+    written with sorted keys and no whitespace, which is enough for v0;
+    a formal canonical-JSON spec is out of scope (see future work).
     """
     payload = charter.model_dump(mode="json")
     payload["provenance"]["issuer_signature"] = ""
+    payload["provenance"]["transparency_log_id"] = None
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
 
 
@@ -182,11 +236,38 @@ def sign_charter(charter: Charter, private_key: Ed25519PrivateKey) -> Charter:
     The caller is responsible for setting `provenance.issuer_public_key` to
     match this private key before calling sign_charter — typically done at
     Charter construction time.
+
+    Side effects:
+        - `provenance.issuer_kid` is populated automatically from the
+          embedded public key (v0.8+). The `kid` becomes part of the
+          signed payload so verifiers can detect attempts to swap it.
+        - `provenance.issuer_signature` is set to the final signature.
+        - The signed Charter is appended to the v0.8 transparency log
+          (`data/transparency.log`). Idempotent on `charter_id`, so
+          re-signing (e.g. revoke / renew) does NOT create a new log
+          entry — the original issuance entry stays the source of truth.
     """
+    # Populate kid BEFORE building canonical bytes so it's covered by the
+    # signature. If a caller already set it (e.g. testing with a fixed
+    # value) we leave it alone.
+    if charter.provenance.issuer_kid is None:
+        charter.provenance.issuer_kid = kid_for_public_key(charter.provenance.issuer_public_key)
+
     payload = _canonical_bytes(charter)
     signature = private_key.sign(payload)
     encoded = f"ed25519:{base64.b64encode(signature).decode('ascii')}"
     charter.provenance.issuer_signature = encoded
+
+    # Append to the transparency log. Lazy-import to avoid a circular import
+    # with charter.storage / charter.schema during module init.
+    from . import transparency
+
+    entry = transparency.append(charter)
+    # Record where the Charter landed in the log so calling agents can
+    # jump directly to /transparency/proof/<charter_id> without scanning.
+    # This field is OUTSIDE the canonical bytes — see `_canonical_bytes`.
+    charter.provenance.transparency_log_id = entry.seq
+
     return charter
 
 

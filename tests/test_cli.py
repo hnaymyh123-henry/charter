@@ -133,17 +133,36 @@ def test_revoke_causes_fetch_to_raise(temp_data_dir: Path, monkeypatch: pytest.M
     runner = CliRunner()
     runner.invoke(cli, ["revoke", "alice@acme.com", "research_agent_v1"])
 
-    # Stub fetch to read from disk instead of HTTP.
+    # Stub fetch to read from disk instead of HTTP. The v0.8 JWKS
+    # cross-check requires the issuer's JWKS to publish the same key, so
+    # we also serve a one-key JWKS that mirrors the Charter's own
+    # `issuer_kid` -> `issuer_public_key`.
     revoked = load_charter("alice@acme.com", "research_agent_v1")
     assert revoked is not None
 
     import httpx
 
-    def fake_get(_url, *, timeout=10.0):  # noqa: ARG001
+    from charter import keys as keys_mod
+    from charter.signing import public_key_to_jwk
+
+    keys_mod.clear_cache()
+    revoked_dump = revoked.model_dump(mode="json")
+    kid = revoked.provenance.issuer_kid
+    jwks_body = (
+        {"keys": [public_key_to_jwk(revoked.provenance.issuer_public_key, kid=kid)]}
+        if kid is not None
+        else {"keys": []}
+    )
+
+    def fake_get(url, *, timeout=10.0):  # noqa: ARG001
+        if "/.well-known/jwks.json" in url:
+            req = httpx.Request("GET", url)
+            return httpx.Response(200, json=jwks_body, request=req)
         req = httpx.Request("GET", "http://test")
-        return httpx.Response(200, json=revoked.model_dump(mode="json"), request=req)
+        return httpx.Response(200, json=revoked_dump, request=req)
 
     monkeypatch.setattr("charter.mcp_server.httpx.get", fake_get)
+    monkeypatch.setattr("charter.keys.httpx.get", fake_get)
 
     with pytest.raises(CharterRevokedError):
         _fetch_and_verify("http://test/x")

@@ -52,6 +52,36 @@ class CharterRevokedError(CharterError):
     delegation."""
 
 
+class CharterKeyMismatchError(CharterError):
+    """A v0.8+ Charter's `issuer_kid` points at a key in the issuer's
+    JWKS that does NOT match the embedded `issuer_public_key`, OR the
+    `issuer_kid` is not listed in the JWKS at all.
+
+    Both cases mean the issuer's published key directory disagrees
+    with what the Charter claims signed it — either the Charter is a
+    forgery, or the issuer is lying about which key signed it.
+    Callers should treat as `incompatible`."""
+
+
+class CharterPinMismatchError(CharterError):
+    """A Charter's verifying key does NOT match the previously-pinned
+    fingerprint for this principal. This is the layer that catches a
+    host compromise where the attacker now signs with their own key
+    and rotated the JWKS at the same time. Callers should treat as
+    `incompatible`. After a legitimate key rotation the operator must
+    run `charter pins reset <principal>` to drop the pin."""
+
+
+class JWKSNotFoundError(CharterError):
+    """The issuer's `.well-known/jwks.json` endpoint could not be
+    reached (404, 5xx, or network error). Raised by `fetch_jwks`."""
+
+
+class JWKSParseError(CharterError):
+    """The body returned by `.well-known/jwks.json` was not a valid
+    JWKS document. Raised by `fetch_jwks`."""
+
+
 __all__ = [
     "CharterError",
     "CharterNotFoundError",
@@ -59,4 +89,8 @@ __all__ = [
     "CharterSignatureError",
     "CharterExpiredError",
     "CharterRevokedError",
+    "CharterKeyMismatchError",
+    "CharterPinMismatchError",
+    "JWKSNotFoundError",
+    "JWKSParseError",
 ]

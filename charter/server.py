@@ -22,15 +22,19 @@ readiness probes.
 
 from __future__ import annotations
 
+import json
 import os
+from collections.abc import Iterator
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse, StreamingResponse
 
+from . import transparency
 from .constants import DEFAULT_URL_BASE
-from .storage import list_charters, load_charter
+from .signing import public_key_to_jwk
+from .storage import list_charters, list_known_issuer_keys, load_charter
 
 app = FastAPI(title="Charter Service", version="0.1.0")
 
@@ -82,6 +86,35 @@ def lookup(principal_id: str, agent_id: str) -> dict[str, str]:
     }
 
 
+@app.get("/.well-known/jwks.json")
+def well_known_jwks() -> dict[str, list[dict[str, str]]]:
+    """JSON Web Key Set per RFC 7517 — the issuer's public keys.
+
+    Charters carry `provenance.issuer_kid`; callers fetch this JWKS and
+    look up the matching key by `kid` to verify the signature without
+    trusting the inline `issuer_public_key`. That closes the v0 TOFU
+    gap: a rotated key won't match a pinned `kid`, and a wrong key in
+    the JWKS won't match the Charter's `kid`.
+
+    In **self-hosted mode** (`CHARTER_SELF_HOSTED_PRINCIPAL` set), the
+    JWKS is filtered to that principal's keys only. In **multi-tenant
+    mode**, the server exposes every issuer key it knows about; each
+    JWK carries an `iss` extension field naming the principal so
+    callers can match by `(iss, kid)`.
+    """
+    principal_filter = _self_hosted_principal()
+    keys: list[dict[str, str]] = []
+    for principal_id, public_key_str in list_known_issuer_keys():
+        if principal_filter is not None and principal_id != principal_filter:
+            continue
+        jwk = public_key_to_jwk(public_key_str)
+        # Non-standard extension. `iss` is widely understood as "issuer"
+        # in JWT/JWS contexts and is the natural field name here.
+        jwk["iss"] = principal_id
+        keys.append(jwk)
+    return {"keys": keys}
+
+
 @app.get("/.well-known/charter/{agent_id}")
 def well_known_charter(agent_id: str) -> JSONResponse:
     """Self-hosted Charter discovery.
@@ -107,6 +140,93 @@ def well_known_charter(agent_id: str) -> JSONResponse:
     if charter is None:
         raise HTTPException(status_code=404, detail="charter not found")
     return JSONResponse(content=charter.model_dump(mode="json"))
+
+
+@app.get("/transparency/head")
+def transparency_head() -> dict[str, Any]:
+    """Return the most recent transparency-log entry's metadata.
+
+    Lets a client cheaply check "is the log at the seq I last verified?"
+    before deciding to pull `/transparency/log`. Empty log returns
+    `{seq: 0, entry_hash: <genesis>, appended_at: null}` rather than
+    404, so clients can poll without special-casing first-run.
+    """
+    h = transparency.head()
+    if h is None:
+        return {
+            "seq": 0,
+            "entry_hash": transparency.GENESIS_PREV_HASH,
+            "appended_at": None,
+        }
+    return {
+        "seq": h.seq,
+        "entry_hash": h.entry_hash,
+        "appended_at": h.appended_at.isoformat(),
+    }
+
+
+@app.get("/transparency/log")
+def transparency_log(
+    since: int = Query(default=0, ge=0, description="Skip entries with seq <= since."),
+) -> StreamingResponse:
+    """Stream the transparency log as `application/x-ndjson`.
+
+    One JSON object per line, ordered by `seq`. `?since=N` skips
+    entries with `seq <= N` (use the last seq the client already
+    verified to do incremental syncs).
+
+    No auth in v0.8 — the log is intentionally public; that's the
+    whole point of transparency.
+    """
+
+    def _iter() -> Iterator[str]:
+        for entry in transparency.read_log():
+            if entry.seq <= since:
+                continue
+            yield json.dumps(entry.to_dict(), ensure_ascii=False) + "\n"
+
+    return StreamingResponse(_iter(), media_type="application/x-ndjson")
+
+
+@app.get("/transparency/proof/{charter_id:path}")
+def transparency_proof(charter_id: str) -> dict[str, Any]:
+    """Return the inclusion proof for one Charter.
+
+    Body shape:
+
+        {
+          "entry": { ...the full transparency entry... },
+          "chain": [
+            {"seq": 1, "entry_hash": "sha256:..."},
+            ...
+            {"seq": N, "entry_hash": "sha256:..."}  // = entry.seq
+          ]
+        }
+
+    `chain` lists every entry's `entry_hash` from `seq=1` up to and
+    including the target's `seq`. A client can independently fetch
+    `/transparency/log` and recompute each entry's hash from its
+    canonical JSON; the chain here is just enough to bind the
+    target's `entry_hash` to a sequence position.
+
+    In v0.8 this is a linear-chain proof. Merkle-tree proofs with
+    `O(log n)` size are on the v0.9+ backlog.
+
+    Uses `:path` so charter ids that contain colons (the canonical
+    format `charter:principal:agent:date`) don't get rejected by
+    FastAPI's default segment matcher.
+    """
+    target = transparency.get_entry(charter_id)
+    if target is None:
+        raise HTTPException(
+            status_code=404, detail=f"no transparency entry for charter_id={charter_id!r}"
+        )
+    chain: list[dict[str, Any]] = []
+    for entry in transparency.read_log():
+        chain.append({"seq": entry.seq, "entry_hash": entry.entry_hash})
+        if entry.seq >= target.seq:
+            break
+    return {"entry": target.to_dict(), "chain": chain}
 
 
 @app.get("/{principal_id}/{agent_id}")

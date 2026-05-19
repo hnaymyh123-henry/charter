@@ -23,13 +23,18 @@ Subcommands:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 from dotenv import load_dotenv
+
+if TYPE_CHECKING:
+    from .transparency import ChainVerification, TransparencyEntry
 
 from ._logging import get_logger
 from .constants import DEFAULT_URL_BASE, DEFAULT_VALID_DAYS
@@ -304,6 +309,317 @@ def renew(principal_id: str, agent_id: str, valid_days: int | None) -> None:
     click.echo(f"  live file:      {saved}")
     click.echo(f"  archived file:  {archived}")
     click.echo("")
+
+
+@cli.group()
+def audit() -> None:
+    """Walk and inspect the v0.8 transparency log.
+
+    Two subcommands:
+
+        charter audit verify [--remote URL] [--since SEQ]
+            Walks the transparency log (local data/transparency.log by
+            default, or a remote `/transparency/log` endpoint) and
+            verifies the SHA-256 chain. Exit code 0 on success, 1 on
+            chain break, 2 on network or parse failure.
+
+        charter audit show <charter_id>
+            Pretty-prints the transparency entry for a Charter, plus a
+            list of every entry that shares the same issuer or binding.
+    """
+
+
+@audit.command("verify")
+@click.option(
+    "--remote",
+    type=str,
+    default=None,
+    metavar="ORIGIN",
+    help=(
+        "Remote issuer origin (e.g. https://charter.example.com). "
+        "Fetches /transparency/log from that origin instead of reading "
+        "the local data/transparency.log."
+    ),
+)
+@click.option(
+    "--since",
+    type=int,
+    default=0,
+    metavar="SEQ",
+    help="Skip entries with seq <= SEQ. Useful for resuming an audit.",
+)
+def audit_verify(remote: str | None, since: int) -> None:
+    """Verify the SHA-256 chain of the transparency log."""
+    from . import transparency
+
+    if remote is not None:
+        try:
+            entries = _fetch_remote_log(remote, since=since)
+        except _RemoteFetchError as e:
+            click.echo(click.style(f"[ERROR] {e}", fg="red", bold=True), err=True)
+            sys.exit(2)
+        result = _verify_entries(entries, since=since)
+    else:
+        # Local mode delegates to the in-process verifier when --since is
+        # 0 (full chain), and slices the local log when --since > 0 so we
+        # match what a remote /transparency/log?since=N call would see.
+        if since == 0:
+            result = transparency.verify_chain()
+        else:
+            sliced = [e for e in transparency.read_log() if e.seq > since]
+            result = _verify_entries(sliced, since=since)
+
+    if result.ok:
+        scope = "remote" if remote is not None else "local"
+        click.echo(click.style("[OK] Transparency log verified", fg="green", bold=True))
+        click.echo(f"  source:        {remote if remote else 'data/transparency.log'} ({scope})")
+        click.echo(f"  entries:       {result.entries}")
+        if result.entries > 0:
+            click.echo(f"  range:         seq {since + 1} -> seq {since + result.entries}")
+            click.echo(f"  head_hash:     {result.head_hash}")
+        else:
+            click.echo("  (log is empty)")
+        sys.exit(0)
+
+    click.echo(
+        click.style(f"[ERROR] Chain broken at seq {result.broken_at_seq}", fg="red", bold=True),
+        err=True,
+    )
+    click.echo(f"  reason: {result.reason}", err=True)
+    sys.exit(1)
+
+
+@audit.command("show")
+@click.argument("charter_id")
+def audit_show(charter_id: str) -> None:
+    """Pretty-print a Charter's transparency entry + related entries.
+
+    "Related" means anything that shares the issuer (principal_id) or
+    the full binding. Useful for the question "show me every Charter
+    this issuer has ever signed."
+    """
+    from . import transparency
+
+    target = transparency.get_entry(charter_id)
+    if target is None:
+        click.echo(f"No transparency entry found for {charter_id}.", err=True)
+        sys.exit(1)
+
+    click.echo("")
+    click.echo(click.style(f"Charter: {target.charter_id}", bold=True))
+    click.echo(f"  seq:              {target.seq}")
+    click.echo(f"  principal_id:     {target.binding['principal_id']}")
+    click.echo(f"  agent_id:         {target.binding['agent_id']}")
+    click.echo(f"  issuer_kid:       {target.issuer_kid}")
+    click.echo(f"  appended_at:      {target.appended_at.isoformat()}")
+    click.echo(f"  prev_hash:        {target.prev_hash}")
+    click.echo(f"  entry_hash:       {target.entry_hash}")
+
+    # Related: same principal_id (treat principal as the issuer for the
+    # self-attesting Charters we ship by default).
+    related = [
+        e
+        for e in transparency.read_log()
+        if e.charter_id != target.charter_id
+        and e.binding["principal_id"] == target.binding["principal_id"]
+    ]
+    if related:
+        click.echo("")
+        click.echo(
+            click.style(
+                f"Other entries from {target.binding['principal_id']} ({len(related)}):",
+                bold=True,
+            )
+        )
+        for e in related:
+            same_binding = e.binding["agent_id"] == target.binding["agent_id"]
+            marker = "*" if same_binding else " "
+            click.echo(
+                f"  {marker} seq {e.seq:>4}  {e.charter_id}  "
+                f"({e.binding['agent_id']}, {e.appended_at.date()})"
+            )
+        click.echo("")
+        click.echo("  ('*' marks entries that share this exact binding.)")
+    click.echo("")
+
+
+# ----- audit helpers ------------------------------------------------------
+
+
+class _RemoteFetchError(Exception):
+    """Raised by `_fetch_remote_log` for any HTTP / parse failure. CLI
+    converts to exit code 2."""
+
+
+def _fetch_remote_log(origin: str, *, since: int) -> list[TransparencyEntry]:
+    """Fetch `/transparency/log[?since=N]` from a remote issuer origin and
+    parse the NDJSON body into TransparencyEntry objects."""
+    import httpx
+
+    from .transparency import TransparencyEntry
+
+    url = origin.rstrip("/") + "/transparency/log"
+    params = {"since": since} if since > 0 else None
+    try:
+        resp = httpx.get(url, params=params, timeout=30.0)
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        raise _RemoteFetchError(f"GET {url} -> HTTP {e.response.status_code}") from e
+    except httpx.RequestError as e:
+        raise _RemoteFetchError(f"GET {url} failed: {e}") from e
+
+    entries: list[TransparencyEntry] = []
+    for line in resp.text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            raw = json.loads(line)
+            entries.append(TransparencyEntry.from_dict(raw))
+        except (ValueError, KeyError, TypeError) as e:
+            raise _RemoteFetchError(f"unparseable log line: {e}") from e
+    return entries
+
+
+def _verify_entries(entries: list[TransparencyEntry], *, since: int) -> ChainVerification:
+    """Run the same SHA-256 chain check as transparency.verify_chain but
+    on an arbitrary slice (used for `--since` and `--remote`)."""
+    from .transparency import (
+        GENESIS_PREV_HASH,
+        ChainVerification,
+        _hash_entry_fields,
+    )
+
+    if not entries:
+        return ChainVerification(
+            ok=True,
+            entries=0,
+            head_hash=GENESIS_PREV_HASH,
+            broken_at_seq=None,
+            reason=None,
+        )
+
+    # For a since-sliced verification we still need a known-good anchor
+    # for the first entry's prev_hash. The caller passing since=N means
+    # "verify entries with seq > N"; we trust that the entry at seq=N+1
+    # carries a prev_hash that points at the unseen seq=N. We can verify
+    # the chain INTERNALLY but cannot prove the first entry's prev_hash
+    # without seq=N. That's fine for the `verify` UX — the audit log is
+    # public, so a follow-up `--since 0` would catch any tampering of
+    # the unseen prefix.
+    expected_prev = entries[0].prev_hash if since > 0 else GENESIS_PREV_HASH
+
+    for entry in entries:
+        if entry.prev_hash != expected_prev:
+            return ChainVerification(
+                ok=False,
+                entries=len(entries),
+                head_hash=entries[-1].entry_hash,
+                broken_at_seq=entry.seq,
+                reason=(
+                    f"prev_hash mismatch at seq={entry.seq}: "
+                    f"expected {expected_prev}, found {entry.prev_hash}"
+                ),
+            )
+        recomputed = _hash_entry_fields(
+            {k: v for k, v in entry.to_dict().items() if k != "entry_hash"}
+        )
+        if recomputed != entry.entry_hash:
+            return ChainVerification(
+                ok=False,
+                entries=len(entries),
+                head_hash=entries[-1].entry_hash,
+                broken_at_seq=entry.seq,
+                reason=(
+                    f"entry_hash mismatch at seq={entry.seq}: "
+                    f"recomputed {recomputed}, found {entry.entry_hash}"
+                ),
+            )
+        expected_prev = entry.entry_hash
+
+    return ChainVerification(
+        ok=True,
+        entries=len(entries),
+        head_hash=entries[-1].entry_hash,
+        broken_at_seq=None,
+        reason=None,
+    )
+
+
+@cli.group()
+def pins() -> None:
+    """Inspect or reset issuer-key fingerprint pins (v0.8 trust model).
+
+    Pins live in `data/pins.json` (override with `CHARTER_PIN_FILE`).
+    Each pin records the SHA-256 fingerprint of an issuer's signing key
+    the first time we see it, so a later swap to a different key fires
+    `CharterPinMismatchError` at fetch time. Run `charter pins reset`
+    after a *legitimate* key rotation to authorize the new fingerprint.
+    """
+
+
+@pins.command("list")
+def pins_list() -> None:
+    """Pretty-print the current pin table."""
+    from .pins import list_pins
+
+    table = list_pins()
+    if not table:
+        click.echo("No pins recorded yet.")
+        return
+
+    click.echo("")
+    click.echo(click.style(f"Pinned issuers ({len(table)}):", bold=True))
+    for principal_id, pin in sorted(table.items()):
+        click.echo(f"  {click.style(principal_id, bold=True)}")
+        click.echo(f"    fingerprint:   {pin.fingerprint}")
+        click.echo(f"    first_seen:    {pin.first_seen.isoformat()}")
+        click.echo(f"    last_verified: {pin.last_verified.isoformat()}")
+    click.echo("")
+
+
+@pins.command("reset")
+@click.argument("principal_id")
+@click.option(
+    "-y",
+    "--yes",
+    is_flag=True,
+    default=False,
+    help="Skip the confirmation prompt.",
+)
+def pins_reset(principal_id: str, yes: bool) -> None:
+    """Drop the pin for PRINCIPAL_ID.
+
+    Use this after a legitimate key rotation. The next fetch will
+    establish a fresh pin. Prints the current fingerprint and asks for
+    confirmation unless `--yes` is given.
+
+    Example:
+        charter pins reset alice@acme.com
+    """
+    from .pins import get_pin, reset_pin
+
+    pin = get_pin(principal_id)
+    if pin is None:
+        click.echo(f"No pin recorded for {principal_id}.", err=True)
+        sys.exit(1)
+
+    click.echo("")
+    click.echo(f"  principal:     {principal_id}")
+    click.echo(f"  fingerprint:   {pin.fingerprint}")
+    click.echo(f"  first_seen:    {pin.first_seen.isoformat()}")
+    click.echo(f"  last_verified: {pin.last_verified.isoformat()}")
+    click.echo("")
+
+    if not yes:
+        click.confirm(
+            f"Drop the pin for {principal_id}? Only do this after a LEGITIMATE key rotation.",
+            abort=True,
+        )
+
+    reset_pin(principal_id)
+    click.echo(click.style(f"[OK] Pin dropped for {principal_id}.", fg="yellow", bold=True))
+    click.echo("  The next fetch will establish a fresh pin.")
 
 
 def main() -> None:
