@@ -147,6 +147,22 @@ def list_charters() -> list[Charter]:
     return out
 
 
+def list_known_issuer_keys() -> list[tuple[str, str]]:
+    """Walk all live Charters and return distinct (principal_id, public_key) pairs.
+
+    Used to assemble the JWKS at `/.well-known/jwks.json`. Dedupes on
+    `(principal_id, public_key_string)` — a single issuer with one key
+    becomes one entry; an issuer that has rotated produces multiple
+    entries (the JWKS exposes both so old Charters still verify).
+
+    Output is sorted for deterministic ordering across calls.
+    """
+    seen: set[tuple[str, str]] = set()
+    for charter in list_charters():
+        seen.add((charter.issuer.id, charter.provenance.issuer_public_key))
+    return sorted(seen)
+
+
 # ---------------------------------------------------------------------------
 # Issuer key I/O (with auto-create-on-demand for demo convenience)
 # ---------------------------------------------------------------------------

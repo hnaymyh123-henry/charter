@@ -182,10 +182,17 @@ class Provenance(BaseModel):
     `issuer_public_key` is embedded inline (Self-Attesting Charter, §P2-9).
     Calling agents verify `issuer_signature` against this public key directly,
     using HTTPS to charter_url as the trust root.
+
+    v0.8+: when an issuer publishes a JWKS at
+    `{issuer_origin}/.well-known/jwks.json`, `issuer_kid` lets the caller
+    route to the right key in the JWKS without scanning. Charters issued
+    before v0.8 leave it `None`; verification falls back to the inline
+    `issuer_public_key`.
     """
 
     issuer_public_key: str  # "ed25519:<base64>"
     issuer_signature: str = ""  # "ed25519:<base64>" — set during signing
+    issuer_kid: str | None = None  # JWKS key id; populated by sign_charter
     source_commitments: list[SourceCommitment] = Field(default_factory=list)
     generated_at: datetime
 

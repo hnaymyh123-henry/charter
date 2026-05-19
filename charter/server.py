@@ -30,7 +30,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
 from .constants import DEFAULT_URL_BASE
-from .storage import list_charters, load_charter
+from .signing import public_key_to_jwk
+from .storage import list_charters, list_known_issuer_keys, load_charter
 
 app = FastAPI(title="Charter Service", version="0.1.0")
 
@@ -80,6 +81,35 @@ def lookup(principal_id: str, agent_id: str) -> dict[str, str]:
         "charter_url": f"{base}/{principal_id}/{agent_id}",
         "charter_id": charter.charter_id,
     }
+
+
+@app.get("/.well-known/jwks.json")
+def well_known_jwks() -> dict[str, list[dict[str, str]]]:
+    """JSON Web Key Set per RFC 7517 — the issuer's public keys.
+
+    Charters carry `provenance.issuer_kid`; callers fetch this JWKS and
+    look up the matching key by `kid` to verify the signature without
+    trusting the inline `issuer_public_key`. That closes the v0 TOFU
+    gap: a rotated key won't match a pinned `kid`, and a wrong key in
+    the JWKS won't match the Charter's `kid`.
+
+    In **self-hosted mode** (`CHARTER_SELF_HOSTED_PRINCIPAL` set), the
+    JWKS is filtered to that principal's keys only. In **multi-tenant
+    mode**, the server exposes every issuer key it knows about; each
+    JWK carries an `iss` extension field naming the principal so
+    callers can match by `(iss, kid)`.
+    """
+    principal_filter = _self_hosted_principal()
+    keys: list[dict[str, str]] = []
+    for principal_id, public_key_str in list_known_issuer_keys():
+        if principal_filter is not None and principal_id != principal_filter:
+            continue
+        jwk = public_key_to_jwk(public_key_str)
+        # Non-standard extension. `iss` is widely understood as "issuer"
+        # in JWT/JWS contexts and is the natural field name here.
+        jwk["iss"] = principal_id
+        keys.append(jwk)
+    return {"keys": keys}
 
 
 @app.get("/.well-known/charter/{agent_id}")
