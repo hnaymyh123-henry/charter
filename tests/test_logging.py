@@ -170,13 +170,39 @@ def _stub_httpx(
     json_payload: Any = None,
     raise_request_error: bool = False,
 ) -> None:
-    def fake_get(_url, *, timeout=10.0):  # noqa: ARG001
+    """Replace `httpx.get` for both Charter fetch and the v0.8 JWKS lookup.
+
+    JWKS publishes the Charter's own key under its `issuer_kid`, so the
+    v0.8 cross-check passes and these tests stay about Charter-layer
+    behavior.
+    """
+    from charter import keys as keys_mod
+    from charter.signing import public_key_to_jwk
+
+    keys_mod.clear_cache()
+
+    def _build_jwks_body() -> dict:
+        if not isinstance(json_payload, dict):
+            return {"keys": []}
+        prov = json_payload.get("provenance") or {}
+        kid = prov.get("issuer_kid")
+        pk = prov.get("issuer_public_key")
+        if not isinstance(kid, str) or not isinstance(pk, str):
+            return {"keys": []}
+        jwk = public_key_to_jwk(pk, kid=kid)
+        return {"keys": [jwk]}
+
+    def fake_get(url, *, timeout=10.0):  # noqa: ARG001
+        if "/.well-known/jwks.json" in url:
+            req = httpx.Request("GET", url)
+            return httpx.Response(200, json=_build_jwks_body(), request=req)
         if raise_request_error:
             raise httpx.ConnectError("connection refused")
         req = httpx.Request("GET", "http://test")
         return httpx.Response(status_code, json=json_payload or {}, request=req)
 
     monkeypatch.setattr("charter.mcp_server.httpx.get", fake_get)
+    monkeypatch.setattr("charter.keys.httpx.get", fake_get)
 
 
 def _outcomes(caplog: pytest.LogCaptureFixture, logger: str = "charter.fetch") -> list[str]:
