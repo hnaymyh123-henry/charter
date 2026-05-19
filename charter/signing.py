@@ -213,12 +213,15 @@ def public_key_to_jwk(public_key_str: str, *, kid: str | None = None) -> dict[st
 def _canonical_bytes(charter: Charter) -> bytes:
     """Serialize a Charter for signing.
 
-    The signature field is cleared first to break the self-reference. JSON is
-    written with sorted keys and no whitespace, which is enough for v0; a
-    formal canonical-JSON spec is out of scope (see future work).
+    `issuer_signature` is cleared to break the self-reference, and
+    `transparency_log_id` is cleared because the log entry can only be
+    written AFTER the signature is final (chicken-and-egg). JSON is
+    written with sorted keys and no whitespace, which is enough for v0;
+    a formal canonical-JSON spec is out of scope (see future work).
     """
     payload = charter.model_dump(mode="json")
     payload["provenance"]["issuer_signature"] = ""
+    payload["provenance"]["transparency_log_id"] = None
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
 
 
@@ -259,7 +262,11 @@ def sign_charter(charter: Charter, private_key: Ed25519PrivateKey) -> Charter:
     # with charter.storage / charter.schema during module init.
     from . import transparency
 
-    transparency.append(charter)
+    entry = transparency.append(charter)
+    # Record where the Charter landed in the log so calling agents can
+    # jump directly to /transparency/proof/<charter_id> without scanning.
+    # This field is OUTSIDE the canonical bytes — see `_canonical_bytes`.
+    charter.provenance.transparency_log_id = entry.seq
 
     return charter
 

@@ -188,11 +188,21 @@ class Provenance(BaseModel):
     route to the right key in the JWKS without scanning. Charters issued
     before v0.8 leave it `None`; verification falls back to the inline
     `issuer_public_key`.
+
+    `transparency_log_id` is the `seq` of this Charter's entry in the
+    issuer's transparency log. Populated by `sign_charter` AFTER the
+    signature is computed and the log entry is appended. NOT covered by
+    the signature (it has to be excluded from the canonical bytes — the
+    log entry can only be written after the signature is final). Lets a
+    calling agent jump straight to `{issuer_origin}/transparency/proof/...`
+    without scanning the log. `None` for Charters issued before v0.8 or
+    when the log was not reachable at sign time.
     """
 
     issuer_public_key: str  # "ed25519:<base64>"
     issuer_signature: str = ""  # "ed25519:<base64>" — set during signing
     issuer_kid: str | None = None  # JWKS key id; populated by sign_charter
+    transparency_log_id: int | None = None  # log seq; populated by sign_charter
     source_commitments: list[SourceCommitment] = Field(default_factory=list)
     generated_at: datetime
 
