@@ -239,6 +239,10 @@ def sign_charter(charter: Charter, private_key: Ed25519PrivateKey) -> Charter:
           embedded public key (v0.8+). The `kid` becomes part of the
           signed payload so verifiers can detect attempts to swap it.
         - `provenance.issuer_signature` is set to the final signature.
+        - The signed Charter is appended to the v0.8 transparency log
+          (`data/transparency.log`). Idempotent on `charter_id`, so
+          re-signing (e.g. revoke / renew) does NOT create a new log
+          entry — the original issuance entry stays the source of truth.
     """
     # Populate kid BEFORE building canonical bytes so it's covered by the
     # signature. If a caller already set it (e.g. testing with a fixed
@@ -250,6 +254,13 @@ def sign_charter(charter: Charter, private_key: Ed25519PrivateKey) -> Charter:
     signature = private_key.sign(payload)
     encoded = f"ed25519:{base64.b64encode(signature).decode('ascii')}"
     charter.provenance.issuer_signature = encoded
+
+    # Append to the transparency log. Lazy-import to avoid a circular import
+    # with charter.storage / charter.schema during module init.
+    from . import transparency
+
+    transparency.append(charter)
+
     return charter
 
 
