@@ -83,15 +83,15 @@ class JWKSParseError(CharterError):
 
 
 class CharterChainGraderError(CharterError):
-    """The LLM grader powering `verify_chain_semantic` could not return a
-    usable verdict. Wraps Anthropic network errors, timeouts, and
-    unparseable / schema-noncompliant JSON output.
+    """Raised when the semantic grader call fails (timeout, malformed JSON,
+    etc.). Wraps Anthropic network errors, timeouts, and unparseable /
+    schema-noncompliant JSON output.
 
-    `verify_chain_semantic` does not silently fall back to string mode on
-    grader failure — the caller has to decide whether to retry, downgrade,
-    or treat the chain as unverifiable. The `auto` mode in `verify_chain`
-    catches this exception and reports the chain as failed; it does NOT
-    re-promote a string failure into a pass."""
+    Propagates to the caller in both `semantic` and `auto` modes of
+    `verify_chain` — callers decide whether to retry, fall back, or
+    surface the error. `verify_chain_semantic` does NOT silently fall
+    back to string mode on grader failure, and `auto` mode does NOT
+    swallow this exception to re-promote a string failure into a pass."""
 
 
 __all__ = [
