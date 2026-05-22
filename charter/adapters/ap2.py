@@ -235,13 +235,13 @@ def embed_charter_in_mandate(mandate: dict[str, Any], charter_url: str) -> dict[
     if not isinstance(charter_url, str) or not charter_url:
         raise ValueError("charter_url must be a non-empty string")
 
-    new_mandate = copy.deepcopy(mandate)
+    new_mandate: dict[str, Any] = copy.deepcopy(mandate)
     extensions = new_mandate.get("extensions")
     if not isinstance(extensions, dict):
         extensions = {}
     extensions["charter_url"] = charter_url
     new_mandate["extensions"] = extensions
-    return cast(dict[str, Any], new_mandate)
+    return new_mandate
 
 
 def verify(

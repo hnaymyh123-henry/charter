@@ -180,9 +180,7 @@ def test_verify_allows_when_both_layers_pass(fetch_charter_ok):
 
 def test_verify_returns_needs_approval_when_charter_says_so(fetch_charter_ok):
     """Mandate ok + Charter=needs_approval -> final=needs_approval."""
-    grader = _grader(
-        [{"id": "C-002", "hit": True, "confidence": 0.9, "reason": "large transfer"}]
-    )
+    grader = _grader([{"id": "C-002", "hit": True, "confidence": 0.9, "reason": "large transfer"}])
     mandate = _base_mandate()
 
     result = verify(mandate, fetch_charter_fn=fetch_charter_ok, hits_grader=grader)
