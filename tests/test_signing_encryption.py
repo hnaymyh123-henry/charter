@@ -148,3 +148,77 @@ def test_whitespace_passphrase_treated_as_unset(
     # Whitespace-only env -> treated as unset -> plaintext.
     assert "BEGIN PRIVATE KEY-----" in contents
     assert "BEGIN ENCRYPTED PRIVATE KEY" not in contents
+
+
+# ---------------------------------------------------------------------------
+# Charter with redacted clause (ADR-011 path 1) still signs / verifies
+# ---------------------------------------------------------------------------
+
+
+def test_sign_verify_roundtrip_with_redacted_clause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The load-bearing claim for ADR-011 path 1: introducing
+    `Clause.private_fields` doesn't break the signing primitive."""
+    from datetime import UTC, datetime, timedelta
+
+    from charter.privacy import redact_clause
+    from charter.schema import (
+        AgentOperator,
+        Binding,
+        Charter,
+        Clause,
+        Issuer,
+        Lifecycle,
+        Principal,
+        Provenance,
+        SourceCommitment,
+        Summary,
+        Visibility,
+    )
+    from charter.signing import (
+        generate_keypair as _gen,
+    )
+    from charter.signing import (
+        public_key_to_string,
+        sign_charter,
+        verify_charter,
+    )
+
+    monkeypatch.setenv("CHARTER_DATA_DIR", str(tmp_path))
+
+    text = "Do not act for customer Acme Corp."
+    start = text.index("Acme Corp")
+    red_text, fields, _discs = redact_clause(
+        text, [(start, start + len("Acme Corp"))], salt=b"Z" * 16
+    )
+
+    private, public = _gen()
+    now = datetime.now(UTC).replace(microsecond=0)
+    charter = Charter(
+        charter_id="charter:alice@acme.com:research_agent_v1:2026-05-22",
+        binding=Binding(principal_id="alice@acme.com", agent_id="research_agent_v1"),
+        principal=Principal(id="alice@acme.com", role_summary="Test"),
+        issuer=Issuer(id="alice@acme.com"),
+        agent_operator=AgentOperator(id="generic"),
+        visibility=Visibility(private_clauses="redaction_v1"),
+        summary=Summary(plain_language="Test."),
+        clauses=[
+            Clause(id="C-001", type="out_of_scope", text=red_text, private_fields=fields),
+        ],
+        lifecycle=Lifecycle(issued_at=now, valid_until=now + timedelta(days=30)),
+        provenance=Provenance(
+            issuer_public_key=public_key_to_string(public),
+            issuer_signature="",
+            source_commitments=[
+                SourceCommitment(
+                    type="profile_yaml",
+                    description="test",
+                    content_hash="sha256:" + "0" * 64,
+                )
+            ],
+            generated_at=now,
+        ),
+    )
+    sign_charter(charter, private)
+    assert verify_charter(charter) is True
