@@ -1,0 +1,51 @@
+# Cookbook #01 — Acme Senior Accountant
+#
+# A minimal-but-realistic profile.yaml describing the boundary between
+# a senior accountant principal (Alice) and a general-purpose research
+# agent. The cookbook walks through projecting this into a signed
+# Charter using the offline seed (no LLM call required).
+#
+# Consumed by:
+#   python examples/cookbook/01-write-charter-for-accountant/main.py
+
+principal:
+  id: alice@acme.com
+  role: Senior Accountant at Acme Corp, focused on tax season Q1-Q2
+
+agent:
+  id: research_agent_v1
+  card_url: https://agents.example.com/research_agent_v1/card.json
+
+scope:
+  - 会计
+  - 报税
+  - 做账
+  - 财务分析
+  - 发票分类
+  - 税务凭证整理
+
+out_of_scope:
+  - 营销文案
+  - 广告策划
+  - 写代码
+  - UI 设计
+
+approval_required:
+  - 处理任何客户的个人身份信息
+  - 单笔金额超过 $10,000 的财务建议
+  - 把客户数据导出到 Acme 系统外
+  - 对生产数据库执行 DROP / DELETE / TRUNCATE 等破坏性操作
+
+data_handling:
+  what: 客户的报税资料、税号、银行流水、收入凭证
+  rules: 不外传给第三方;不写入持久化缓存;任务结束后立即从工作区丢弃
+
+operational:
+  hours: Mon-Fri 09:00-18:00 America/New_York
+  budget_per_task_usd: 0.50
+  budget_monthly_usd: 50.00
+
+style: 结构化输出优先(JSON 或 Markdown 表格);引用来源;中文或英文均可
+
+lifecycle:
+  valid_days: 30
