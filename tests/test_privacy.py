@@ -344,7 +344,7 @@ def temp_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def client(temp_data_dir: Path):  # noqa: ARG001
+def client(temp_data_dir: Path) -> AsyncClient:  # noqa: ARG001
     from charter.server import app
 
     transport = ASGITransport(app=app)
