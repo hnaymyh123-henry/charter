@@ -213,7 +213,8 @@ A Public Charter is a single JSON document.
 - `charter_id` is the only canonical identifier; unique per Charter instance.
 - `binding.agent_id` is the single source of truth for the bound agent. No top-level `agent_id`.
 - `principal_chain` is reserved; in v0.1 always an empty array.
-- `visibility.private_clauses` must be `"not_supported_in_v0"`. Selective disclosure is deferred.
+- `visibility.private_clauses` accepts `"not_supported_in_v0"` (pre-ADR-011 default) or `"redaction_v1"` (ADR-011 path 1 — per-span redaction with SD-JWT-style commitments, see §4.6). Whole-clause hiding remains deferred to path 2.
+- `clauses[].private_fields` is optional. When set, each entry carries `{span_start, span_end, disclosure_hash}` pointing into the redacted clause text. The signature commits to the hash, never the plaintext; Charters that omit `private_fields` entirely retain byte-for-byte signing compatibility with v0.x.
 - `summary.plain_language` is informational; not used in decision aggregation.
 - `decision_schema` documents the *shape* of a Compatibility Check verdict, not the verdict itself.
 - `provenance.source_commitments[].content_hash` is opaque to the public artifact; raw sources are never published.
@@ -361,11 +362,24 @@ not.
 | `provenance.source_commitments[]` (type + hash + description) | Yes | Proves derivation without exposing material. |
 | Raw memory, conversation history, full profile | **No** | Principal Context — never on the public artifact. |
 | Original source documents (CV, internal policy, etc.) | **No** | Only commitments are published. |
-| Private clauses | **Not in v0** | Selective disclosure deferred; if a caller can't read a clause, it can't stably judge against it. |
+| Redacted clause spans (with `visibility.private_clauses == "redaction_v1"`) | **Hash only** | ADR-011 path 1 (v0.9). Clause structure, `type`, and surrounding text stay public so the grader LLM still judges hits; the sensitive span is replaced inline by `[REDACTED:<hash-prefix>]` and only its SHA-256(salt &#124;&#124; value) commitment enters the signed bytes. |
+| Disclosure plaintexts (`data/disclosures/<charter>/<id>.json`) | **Behind bearer token** | Served from `GET /disclosures/{charter_id}/{disclosure_id}` only when the request carries `Authorization: Bearer <CHARTER_DISCLOSURE_TOKEN>`. All other requests get an indistinguishable 404, so disclosure ids cannot be enumerated by response shape. |
+| Whole-clause hiding (selective disclosure of clause existence) | **Not in v0.9** | Reserved for ADR-011 path 2 (delegated grading) — see §8.2. |
 
 A Profile YAML is treated as Principal Context. Only its SHA-256
 commitment appears in `provenance.source_commitments`; the original YAML
 is not persisted in or alongside the Public Charter.
+
+**Redaction (path 1) caller workflow.** A calling agent that wants to
+check "does this Charter touch customer Acme Corp?" runs the usual
+grader LLM over the published clause text (with placeholders intact)
+to estimate a hit. If it needs to confirm against a specific candidate
+without ever fetching the plaintext, it calls
+`charter.privacy.match_redacted(clause_text, "Acme Corp", disclosures)`
+locally — a bool that returns True iff the SHA-256(salt &#124;&#124; "Acme Corp")
+reproduces one of the in-clause commitments. The function deliberately
+does not reveal which placeholder matched, so probing with many
+candidates cannot enumerate the disclosure set.
 
 ### 4.7 MCP Tool Surface
 

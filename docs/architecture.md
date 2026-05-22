@@ -160,7 +160,7 @@ flowchart LR
         JWKSUPD["JWKS sync<br/>(provenance.issuer_kid)"]
     end
 
-    subgraph PRIVACY["Privacy Layer (PLANNED Priv-1)"]
+    subgraph PRIVACY["Privacy Layer (SHIPPED v0.9 Priv-1)"]
         REDACT["Redact sensitive<br/>spans in clause text"]
         SDJWT["SD-JWT selective<br/>disclosure wrap"]
     end
@@ -185,8 +185,7 @@ flowchart LR
     classDef planned fill:#fef3c7,stroke:#d97706,color:#000,stroke-dasharray: 5 5
     classDef deferred fill:#f3f4f6,stroke:#6b7280,color:#000,stroke-dasharray: 2 2
 
-    class Y,LLM1,DRAFT,REVIEW,CANON,SIG,FILE,TLAPPEND,DISCUPD,JWKSUPD shipped
-    class REDACT,SDJWT planned
+    class Y,LLM1,DRAFT,REVIEW,CANON,SIG,FILE,TLAPPEND,DISCUPD,JWKSUPD,REDACT,SDJWT shipped
     class MEM deferred
 ```
 
@@ -319,9 +318,9 @@ flowchart TB
             E10["GET /inspect?url=...<br/>PLANNED B3.8"]
         end
 
-        subgraph PRIVACY["Privacy — PLANNED Priv-1 / Priv-2"]
+        subgraph PRIVACY["Privacy — SHIPPED v0.9 Priv-1 / Priv-2 deferred"]
             E11["GET /grade?charter_url=...&task=...<br/>delegated grading (DEFERRED for v1)"]
-            E12["GET /disclosures/{charter_id}<br/>SD-JWT disclosure stems<br/>PLANNED Priv-1"]
+            E12["GET /disclosures/{charter_id}/{disclosure_id}<br/>SD-JWT-style disclosure plaintext<br/>(bearer-token gated)<br/>SHIPPED v0.9 Priv-1"]
         end
 
         subgraph STEPUP["Negotiation — PLANNED B2.5"]
@@ -365,8 +364,8 @@ flowchart TB
     classDef planned fill:#fef3c7,stroke:#d97706,color:#000,stroke-dasharray: 5 5
     classDef deferred fill:#f3f4f6,stroke:#6b7280,color:#000,stroke-dasharray: 2 2
 
-    class E1,E2,E3,E4,E5,E6,E7,E8 shipped
-    class E9,E10,E12,E13,E14 planned
+    class E1,E2,E3,E4,E5,E6,E7,E8,E12 shipped
+    class E9,E10,E13,E14 planned
     class E11 deferred
     class T1,T2,T3,T4,T5,T6,T7,F1 shipped
     class T8,T9,T10,F3,F4,F5 planned

@@ -60,5 +60,5 @@
 2. **TYPE_TO_DECISION** 是协议常量(PRODUCT.md §4.2),不得在代码里被覆盖。
 3. **聚合规则**:`incompatible > needs_approval > allow`,所有路径单调。
 4. **`Charter.binding.agent_id` 是 agent_id 的唯一真相**,不要在顶层加重复字段。
-5. **`visibility.private_clauses` 在 v0.x 必须是 `"not_supported_in_v0"`**,直到隐私层 path 1(#6) 合并才放宽。
+5. **`visibility.private_clauses`** 接受 `"not_supported_in_v0"`(默认,向后兼容)或 `"redaction_v1"`(ADR-011 path 1,v0.9 ship)。后续 path 字面量需在同一 ADR 下扩展;不得在 schema 默认值上引入未在 ADR 登记的字符串。
 6. **`_fetch_and_verify` 顺序**:signature → JWKS 交叉检查 → pin → lifecycle。任何重排序需要在 PR 描述里说明影响。
