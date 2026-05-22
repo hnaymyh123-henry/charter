@@ -312,7 +312,8 @@ def test_pin_file_bypass_attacker_writes_their_own_fingerprint(
 
 
 def test_pin_mismatch_on_unauthorized_key_swap(
-    temp_data_dir: Path, monkeypatch: pytest.MonkeyPatch  # noqa: ARG001
+    temp_data_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,  # noqa: ARG001
 ) -> None:
     """Counter-test: when pins.json is NOT tampered with, a key swap
     between two fetches raises `CharterPinMismatchError`. This is the
