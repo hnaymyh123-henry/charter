@@ -147,13 +147,36 @@ def disclosure_path(charter_id: str, disclosure_id: str) -> Path:
     """Per-disclosure JSON file path.
 
     Both ``charter_id`` and ``disclosure_id`` are treated as untrusted
-    HTTP path parameters (the FastAPI route exposes them directly), so
-    both go through ``_safe()`` to strip every char outside the
-    allowlist (including ``..``, ``/``, ``\\``, null bytes, control
-    chars, percent-decoded path separators FastAPI hands us as raw
-    bytes).
+    HTTP path parameters (the FastAPI route exposes them directly).
+    Defense in depth:
+
+      1. ``_safe()`` strips every char outside the allowlist (including
+         ``..``, ``/``, ``\\``, null bytes, control chars, percent-decoded
+         path separators FastAPI hands us as raw bytes).
+      2. After joining, the result is resolved and verified to live
+         under ``disclosures_root()``. If a future change to ``_safe``
+         or the join logic ever lets a traversal slip through, this
+         check raises ``ValueError`` rather than returning a path that
+         escapes the disclosures directory.
+
+    Caller (``load_disclosure`` / server endpoint) catches the
+    ``ValueError`` and translates to the same 404 every other failure
+    mode returns, so the attacker cannot use response shape to
+    distinguish "valid id, missing file" from "traversal blocked".
     """
-    return disclosures_dir(charter_id) / f"{_safe(disclosure_id)}.json"
+    candidate = disclosures_dir(charter_id) / f"{_safe(disclosure_id)}.json"
+    # Final boundary check — even if `_safe` ever regresses, the
+    # resolved path must live under disclosures_root(). `resolve()`
+    # collapses any residual `..` segments; `is_relative_to` is the
+    # 3.9+ replacement for the older try/except-on-relative_to idiom.
+    root = disclosures_root().resolve()
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(root):
+        raise ValueError(
+            f"disclosure path escapes disclosures_root: "
+            f"charter_id={charter_id!r}, disclosure_id={disclosure_id!r}"
+        )
+    return candidate
 
 
 # ---------------------------------------------------------------------------
