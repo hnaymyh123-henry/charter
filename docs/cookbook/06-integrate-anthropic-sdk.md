@@ -34,7 +34,7 @@ Three reasons you might want this guide anyway:
 > The fix is **redaction + SD-JWT selective disclosure** — this is
 > [ADR-011](../decisions.md#adr-011--隐私层走分层方案不一步到位)'s "path 1",
 > currently planned in
-> [Issue #6](https://github.com/hnaymyh123-henry/charter/issues/6) and
+> [Issue #31](https://github.com/hnaymyh123-henry/charter/issues/31) and
 > *in-flight*, **not yet supported**. Until then, treat the Charter as
 > entirely public — anything you put in a clause is visible to every
 > calling agent.
@@ -234,6 +234,6 @@ Checks:
 - ADR-011 path 1 (redaction + SD-JWT) is the privacy-layer upgrade that
   will let you ship clauses with sensitive values without exposing them
   to every caller's LLM. The work is in-flight on
-  [Issue #6](https://github.com/hnaymyh123-henry/charter/issues/6); this
+  [Issue #31](https://github.com/hnaymyh123-henry/charter/issues/31); this
   cookbook's clause text is intentionally non-sensitive so today's
   public-clause model is safe to use.
