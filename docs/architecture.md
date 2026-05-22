@@ -69,7 +69,7 @@ flowchart TB
     end
 
     subgraph PLANNED_LAYERS["Planned Layers (forward-looking)"]
-        EDGE["Edge Proxy<br/>(Cloudflare + Web Bot Auth)<br/>PLANNED A6"]
+        EDGE["Edge Proxy<br/>(Cloudflare + Web Bot Auth)<br/>SHIPPED A6 (adapter+middleware)"]
         RG["Resource Gateway<br/>(Postgres / Stripe / FS / tools)<br/>PLANNED A8"]
         INSP["Inspector Web UI<br/>PLANNED B3.8"]
         AP2["AP2 Mandate Verifier<br/>PLANNED A5"]
@@ -108,8 +108,8 @@ flowchart TB
     classDef deferred fill:#f3f4f6,stroke:#6b7280,color:#000,stroke-dasharray: 2 2
     classDef external fill:#e0e7ff,stroke:#4338ca,color:#000
 
-    class P,ISS,PROF,SRV,TLOG,JWKS,PINS,DISC,CA,WA,AO shipped
-    class EDGE,RG,INSP,AP2 planned
+    class P,ISS,PROF,SRV,TLOG,JWKS,PINS,DISC,CA,WA,AO,EDGE shipped
+    class RG,INSP,AP2 planned
     class MEMORY deferred
     class HTTPS external
 ```
@@ -283,7 +283,12 @@ sequenceDiagram
   (voluntary, calling-agent-side) into a *Capability-Boundary
   Enforcement* (mandatory, resource-side). The Resource Gateway does
   the same `aggregate_verdict` the Calling Agent does — same primitive,
-  enforced at a different layer.
+  enforced at a different layer. **A6 ships in v0.9** as
+  `charter.adapters.web_bot_auth` — a minimal RFC 9421 subset (Ed25519
+  + four covered components + custom `charter_url` parameter) plus a
+  FastAPI gated middleware that reuses `_fetch_and_verify` so the
+  trust order (signature → JWKS → pin → lifecycle) is identical at the
+  edge and at the calling agent.
 - **B2.5 step-up** is the dual of `propose_within_scope`: instead of
   rewriting the task to fit the Charter, it temporarily widens the
   Charter to fit the task.
@@ -347,7 +352,7 @@ flowchart TB
     subgraph FRAMEWORK["Framework Adapters"]
         F1["OpenAI Agents SDK — SHIPPED v0.7"]
         F2["Anthropic SDK / Claude Agent SDK<br/>DEFERRED (user preference: low priority)"]
-        F3["Web Bot Auth (RFC 9421)<br/>PLANNED A6"]
+        F3["Web Bot Auth (RFC 9421)<br/>SHIPPED A6 (Ed25519 subset + gated middleware)"]
         F4["AP2 Mandate carrier<br/>PLANNED A5"]
         F5["Postgres reference proxy<br/>PLANNED A8"]
     end
@@ -368,8 +373,8 @@ flowchart TB
     class E1,E2,E3,E4,E5,E6,E7,E8 shipped
     class E9,E10,E12,E13,E14 planned
     class E11 deferred
-    class T1,T2,T3,T4,T5,T6,T7,F1 shipped
-    class T8,T9,T10,F3,F4,F5 planned
+    class T1,T2,T3,T4,T5,T6,T7,F1,F3 shipped
+    class T8,T9,T10,F4,F5 planned
     class F2 deferred
     class ES1,ES2,ES3,ES4,ES5,ES6 planned
 ```
