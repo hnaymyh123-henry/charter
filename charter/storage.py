@@ -27,6 +27,7 @@ endpoint can serve a single record without ever loading the others.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -35,6 +36,18 @@ from .constants import DEFAULT_DATA_DIR
 from .privacy import Disclosure
 from .schema import Charter
 from .signing import generate_keypair, load_private_key, save_private_key
+
+# Allowlist of characters that may appear unchanged in a filesystem segment
+# derived from untrusted input. Everything else is replaced by `_`.
+#
+# Why an allowlist (vs blacklist replace of `/` `:` `@`)?
+# A blacklist forgets characters: Windows path separator `\`, parent-dir
+# traversal `..`, null bytes, leading/trailing whitespace, percent-encoded
+# variants that FastAPI decodes before reaching us. An allowlist makes
+# "what is allowed" the explicit contract — a new attack vector that uses
+# a character not in this set is automatically defused, not retroactively
+# patched.
+_SAFE_ALLOWLIST = re.compile(r"[^A-Za-z0-9._-]")
 
 # ---------------------------------------------------------------------------
 # Path helpers
@@ -58,8 +71,44 @@ def keys_dir() -> Path:
 
 
 def _safe(s: str) -> str:
-    """Map a principal_id or agent_id to a filesystem-safe segment."""
-    return s.replace("/", "_").replace(":", "_").replace("@", "_at_")
+    """Map untrusted input (principal_id, agent_id, charter_id,
+    disclosure_id, ...) to a single, safe filesystem segment.
+
+    Hardened against path-traversal: anything outside the allowlist
+    ``[A-Za-z0-9._-]`` is replaced with ``_``. In particular:
+
+      - ``/`` and ``\\``  -> ``_``  (POSIX and Windows separators)
+      - ``..``           ->  ``__`` is not produced because `.` IS allowed,
+        so the literal segment ``..`` is collapsed to ``__`` only when
+        adjacent to another disallowed char. The boundary check in
+        :func:`disclosure_path` is the load-bearing guarantee, not this.
+      - ``:`` and ``@``  -> ``_``  (kept for back-compat with the older
+        blacklist behaviour that produced ``_at_`` for ``@``)
+      - null byte ``\\x00``, control chars, unicode RTL overrides,
+        percent-encoded path bytes already decoded by FastAPI -> ``_``
+      - leading/trailing whitespace stripped before sanitisation
+
+    The literal segments ``.`` and ``..`` are explicitly mapped to ``_``
+    and ``__`` so the resulting segment can never act as "this dir" or
+    "parent dir" when joined into a Path.
+
+    Empty / whitespace-only input is rejected with ``ValueError`` —
+    silently mapping ``""`` to a falsy filesystem segment would let an
+    attacker control which directory is opened by the caller of
+    :func:`disclosure_path`.
+    """
+    stripped = s.strip()
+    if not stripped:
+        raise ValueError("filesystem segment cannot be empty")
+    safe = _SAFE_ALLOWLIST.sub("_", stripped)
+    # After substitution, defang the two segments that the filesystem
+    # treats specially. Mapping both to underscore-padded versions keeps
+    # the segment non-empty and not equal to "." or "..".
+    if safe == ".":
+        return "_"
+    if safe == "..":
+        return "__"
+    return safe
 
 
 def charter_path(principal_id: str, agent_id: str) -> Path:
@@ -95,9 +144,15 @@ def disclosures_dir(charter_id: str) -> Path:
 
 
 def disclosure_path(charter_id: str, disclosure_id: str) -> Path:
-    """Per-disclosure JSON file path. `disclosure_id` is treated as
-    untrusted input so we route it through `_safe` to neutralise
-    `..`/separators before any filesystem call."""
+    """Per-disclosure JSON file path.
+
+    Both ``charter_id`` and ``disclosure_id`` are treated as untrusted
+    HTTP path parameters (the FastAPI route exposes them directly), so
+    both go through ``_safe()`` to strip every char outside the
+    allowlist (including ``..``, ``/``, ``\\``, null bytes, control
+    chars, percent-decoded path separators FastAPI hands us as raw
+    bytes).
+    """
     return disclosures_dir(charter_id) / f"{_safe(disclosure_id)}.json"
 
 
@@ -235,12 +290,19 @@ def load_disclosure(charter_id: str, disclosure_id: str) -> Disclosure | None:
 
     The bearer-token-gated server endpoint at
     `GET /disclosures/{charter_id}/{disclosure_id}` is the only
-    runtime caller. Returns None for both "no such file" and "file
-    exists but is corrupt"; the endpoint translates either into the
-    same 404 so an attacker without the token cannot use response
-    shape to distinguish the two.
+    runtime caller. Returns None for all of:
+
+      - no such file on disk
+      - file exists but is corrupt / not valid JSON
+      - input is rejected by ``_safe`` (empty segment after sanitisation)
+
+    The endpoint translates all of these into the same 404 so an
+    attacker cannot use response shape to distinguish between them.
     """
-    path = disclosure_path(charter_id, disclosure_id)
+    try:
+        path = disclosure_path(charter_id, disclosure_id)
+    except ValueError:
+        return None
     if not path.exists():
         return None
     try:
