@@ -212,6 +212,30 @@ class Provenance(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class SemanticCheckResult(BaseModel):
+    """One cached LLM verdict from `verify_chain_semantic`.
+
+    Cached results are keyed by `f"{parent_charter_id}@{parent.lifecycle.issued_at}"`
+    inside `AttenuationProof.semantic_check_cache`, so any re-sign of the
+    parent (which bumps `issued_at`) invalidates stale verdicts automatically.
+
+    Attributes:
+        matches_subset:
+            True iff the LLM judged child clauses to semantically cover
+            every parent restriction.
+        reason:
+            One short sentence summarizing the grader's reasoning. Stored
+            for audit; not consumed by `verify_chain_semantic` itself.
+        graded_at:
+            Wall-clock timestamp when the verdict was produced. Audit
+            field; verifiers do not gate on it.
+    """
+
+    matches_subset: bool
+    reason: str
+    graded_at: datetime
+
+
 class AttenuationProof(BaseModel):
     """A child Charter's declarative claim that it is a stricter subset
     of its parent.
@@ -230,10 +254,19 @@ class AttenuationProof(BaseModel):
             or inherits. Optional — used for audit traceability. Missing
             entries do not invalidate the chain; `verify_chain` checks
             the actual clause content.
+        semantic_check_cache:
+            Memoization of `verify_chain_semantic` verdicts keyed by
+            `f"{parent_charter_id}@{parent.lifecycle.issued_at.isoformat()}"`.
+            The key embeds `issued_at` so re-signing a parent invalidates
+            all of its cached verdicts. Empty for Charters that have never
+            been semantically verified. Determinism guarantee: once a
+            verdict is cached, subsequent `verify_chain_semantic` calls
+            return the same bool without invoking the LLM.
     """
 
     parent_charter_id: str
     attenuates: dict[str, list[str]] = Field(default_factory=dict)
+    semantic_check_cache: dict[str, SemanticCheckResult] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
