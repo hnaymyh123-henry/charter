@@ -297,6 +297,47 @@ def test_verify_charter_signature_error_yields_incompatible():
     assert "CharterSignatureError" in result.reason
 
 
+def test_verify_charter_fetch_unexpected_connection_error_yields_incompatible():
+    """A caller-injected fetcher that raises a non-CharterError exception
+    (here: a bare `ConnectionError`) must NOT propagate. Per the
+    `verify()` contract the result type is always `AP2VerifyResult`, so
+    the adapter wraps the unexpected exception into an incompatible
+    verdict with the exception type name surfaced in `reason`."""
+
+    def fetch_conn_err(_url: str) -> Charter:
+        raise ConnectionError("dns lookup failed")
+
+    mandate = _base_mandate()
+
+    result = verify(mandate, fetch_charter_fn=fetch_conn_err, hits_grader=_grader([]))
+
+    assert isinstance(result, AP2VerifyResult)
+    assert result.mandate_ok is True
+    assert result.charter_verdict is None
+    assert result.final_decision == "incompatible"
+    assert "ConnectionError" in result.reason
+    assert "unexpected fetcher error" in result.reason
+
+
+def test_verify_charter_fetch_unexpected_type_error_yields_incompatible():
+    """A bug in a custom fetcher that raises `TypeError` (e.g. dict
+    access on `None`) must also be wrapped, not propagated."""
+
+    def fetch_type_err(_url: str) -> Charter:
+        raise TypeError("'NoneType' object is not subscriptable")
+
+    mandate = _base_mandate()
+
+    result = verify(mandate, fetch_charter_fn=fetch_type_err, hits_grader=_grader([]))
+
+    assert isinstance(result, AP2VerifyResult)
+    assert result.mandate_ok is True
+    assert result.charter_verdict is None
+    assert result.final_decision == "incompatible"
+    assert "TypeError" in result.reason
+    assert "unexpected fetcher error" in result.reason
+
+
 def test_verify_mandate_without_charter_url_is_refused(fetch_charter_ok):
     """A mandate with no extensions.charter_url is treated as
     incompatible — a Charter-aware verifier won't silently pass."""

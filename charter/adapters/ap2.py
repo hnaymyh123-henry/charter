@@ -266,7 +266,12 @@ def verify(
 
     A Charter fetch / verify failure (any `CharterError` subclass) is
     caught and surfaced as `charter_verdict=None` so the caller does not
-    have to handle exceptions on top of the result enum.
+    have to handle exceptions on top of the result enum. As a defensive
+    fallback, any *other* exception raised by a caller-injected
+    `fetch_charter_fn` (e.g. raw `httpx.ConnectError`, `KeyError`,
+    `TypeError`) is also caught and wrapped into the same
+    incompatible-with-reason result, so `verify()` never propagates
+    exceptions to its caller.
 
     No LLM call happens inside this function unless the caller did NOT
     provide `hits_grader`, in which case the default Anthropic grader is
@@ -337,6 +342,30 @@ def verify(
             charter_verdict=None,
             final_decision=cast(Any, final),
             reason=f"{reason} (charter fetch error: {type(e).__name__}: {e})",
+        )
+    except Exception as e:
+        # Defensive catch-all: a caller-injected `fetch_charter_fn` may
+        # raise something other than `CharterError` (e.g. `httpx.ConnectError`,
+        # `json.JSONDecodeError`, `KeyError`, `TypeError`). The default
+        # `_fetch_and_verify` already wraps every failure in `CharterError`,
+        # so this branch only triggers for custom fetchers. Per the
+        # `verify()` contract, we MUST return an `AP2VerifyResult` rather
+        # than propagating exceptions to the caller.
+        final, reason = _decide(True, None)
+        _log.exception(
+            "ap2 verify: charter fetch raised unexpected exception",
+            extra={
+                "outcome": "incompatible",
+                "charter_url": charter_url,
+                "error": f"{type(e).__name__}: {e}",
+                "final_decision": final,
+            },
+        )
+        return AP2VerifyResult(
+            mandate_ok=True,
+            charter_verdict=None,
+            final_decision=cast(Any, final),
+            reason=f"unexpected fetcher error: {type(e).__name__}: {e}",
         )
 
     task = _extract_task(mandate)
