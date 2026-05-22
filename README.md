@@ -185,6 +185,63 @@ a concrete local wiring example with Codex CLI + Claude Code.
 
 ---
 
+## Integrations
+
+Framework- and protocol-side adapters live under
+[`charter/adapters/`](charter/adapters/). Each adapter is a thin
+wrapper around Charter's own MCP/SDK surface — the protocol logic
+stays in `charter/`, the adapter only handles the host's wiring.
+
+| Adapter | Module | Purpose |
+|---|---|---|
+| **OpenAI Agents SDK** | [`charter.adapters.openai_agents`](charter/adapters/openai_agents.py) | `@charter_gated` decorator for `function_tool`-style tool functions, plus a one-call `charter_preflight()` helper. |
+| **AP2 Mandate** | [`charter.adapters.ap2`](charter/adapters/ap2.py) | `embed_charter_in_mandate()` writes `extensions.charter_url` into an AP2 mandate; `verify()` runs both the AP2 mandate integrity check and Charter compatibility check and collapses them into one `AP2VerifyResult`. |
+
+### AP2 Mandate adapter
+
+Carry a `charter_url` inside an AP2 mandate envelope so a payment-side
+verifier can ask both "is this transaction authorized?" (AP2) and "is
+this agent allowed to do this kind of work for this principal at all?"
+(Charter) in a single call. The final decision collapses both layers:
+either layer saying no forces an `incompatible` (or `needs_approval`)
+result — only a clean pass on both yields `allow`.
+
+```python
+from charter.adapters.ap2 import embed_charter_in_mandate, verify
+
+# Issuer side: tag the mandate with the agent's Charter.
+mandate = embed_charter_in_mandate(
+    {
+        "payer": "alice@acme.com",
+        "payee": "merchant@example.com",
+        "amount": {"value": 200.0, "currency": "USD"},
+        "task": "Pay $200 for invoice #123.",
+        "signature": "<AP2 signature blob>",
+    },
+    "https://acme.example.com/alice@acme.com/pay_agent_v1",
+)
+
+# Verifier side: one call, two layers checked.
+result = verify(mandate)
+print(result.final_decision)  # "allow" | "needs_approval" | "incompatible"
+print(result.reason)
+```
+
+`fetch_charter_fn` and `hits_grader` are injectable so hosts can plug
+in their own Charter cache layer or keep all LLM traffic on a single
+provider. See
+[`examples/ap2_charter_demo.py`](examples/ap2_charter_demo.py) for an
+end-to-end demo, and the AP2 cookbook chapter (PLANNED B3.9) for the
+production deployment walkthrough.
+
+> This adapter does NOT take a dependency on the AP2 SDK — the
+> mandate is typed as `dict` and the field shape is documented in the
+> module docstring. The mandate-signature check is a mock entry point;
+> hosts wire their real AP2 verifier into `_check_mandate` (see the
+> adapter source for the contract).
+
+---
+
 ## Repo layout
 
 ```
