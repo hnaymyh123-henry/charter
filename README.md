@@ -20,7 +20,30 @@ Charters, one per principal — same binary, different boundaries.
 - **[`CONTEXT.md`](CONTEXT.md)** — glossary of every term used in PRODUCT.md.
 - **[`ROADMAP.md`](ROADMAP.md)** — detailed iteration plans for v0.5 / v0.6 / v0.7.
 - **[`AGENTS.md`](AGENTS.md)** — protocol behavior for worker agents (the 5-step Compatibility Check loop).
+- **[`docs/cookbook/`](docs/cookbook/)** — scenario-driven how-to guides. Start here if you want to *do* something with Charter rather than understand the design.
 - **[`docs/legacy/hackathon-design.md`](docs/legacy/hackathon-design.md)** — original hackathon design doc, kept for historical reference.
+
+## Cookbook
+
+Ten scenario-driven how-to guides with runnable code samples under
+[`examples/cookbook/`](examples/cookbook/). Each guide is self-contained and
+solves one concrete problem.
+
+| # | Guide | What you'll get |
+|---|---|---|
+| 01 | [Write a Charter for an accountant](docs/cookbook/01-write-charter-for-accountant.md) | A signed Charter for an Acme accountant — profile → issue → inspect |
+| 02 | [Chain with budget](docs/cookbook/02-chain-with-budget.md) | A two-hop chain that propagates a per-task budget via `operational_limit` |
+| 03 | [Revoke without breaking in-flight](docs/cookbook/03-revoke-without-breaking-inflight.md) | A grace-period pattern so revocation does not abort running tasks |
+| 04 | [Integrate Stripe](docs/cookbook/04-integrate-stripe.md) | A Charter-gated Stripe payment call (mocked SDK, real flow) |
+| 05 | [Integrate OpenAI Agents SDK](docs/cookbook/05-integrate-openai-agents-sdk.md) | `charter_preflight` + `@charter_gated` decorator end-to-end |
+| 06 | [Integrate Anthropic SDK](docs/cookbook/06-integrate-anthropic-sdk.md) | Template hook points for the Anthropic SDK (adapter pending) |
+| 07 | [Profile YAML best practices](docs/cookbook/07-profile-yaml-best-practices.md) | How to phrase clauses so the LLM grader stays accurate |
+| 08 | [Self-host `.well-known/charter`](docs/cookbook/08-self-host-well-known.md) | Publish Charters on your own domain at `/.well-known/charter/<agent_id>` |
+| 09 | [Deploy a JWKS and rotate keys](docs/cookbook/09-deploy-jwks.md) | Stand up a JWKS endpoint and rotate the issuer key without breaking callers |
+| 10 | [Audit the transparency log](docs/cookbook/10-audit-transparency-log.md) | Walk a full `charter audit verify` / `charter audit show` audit |
+
+See [`docs/cookbook/README.md`](docs/cookbook/README.md) for conventions
+and scope notes.
 
 ---
 
