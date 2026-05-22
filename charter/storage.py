@@ -9,12 +9,19 @@ Layout under `data/`:
           <safe_charter_id>.json             superseded/revoked predecessors
       keys/
         <principal_id>.pem                   Ed25519 private key per issuer
+      disclosures/
+        <safe_charter_id>/
+          <disclosure_id>.json               ADR-011 path 1 plaintexts
 
 The live Charter is the one served by the FastAPI host at
 `/{principal}/{agent}`. The archive directory exists so that a renewed or
 revoked Charter's predecessor is still recoverable by `charter_id` —
 useful for audit trails and for resolving a `replaces` / `replaced_by`
 chain when a calling agent only knows the old `charter_id`.
+
+`disclosures/` was added in ADR-011 path 1. Each `Disclosure` is stored
+in its own file so the bearer-token-gated `GET /disclosures/...`
+endpoint can serve a single record without ever loading the others.
 """
 
 from __future__ import annotations
@@ -25,6 +32,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from .constants import DEFAULT_DATA_DIR
+from .privacy import Disclosure
 from .schema import Charter
 from .signing import generate_keypair, load_private_key, save_private_key
 
@@ -70,6 +78,27 @@ def archive_path(charter_id: str) -> Path:
 
 def key_path(principal_id: str) -> Path:
     return keys_dir() / f"{_safe(principal_id)}.pem"
+
+
+def disclosures_root() -> Path:
+    """`data/disclosures/` — root for ADR-011 path 1 plaintexts."""
+    d = data_root() / "disclosures"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def disclosures_dir(charter_id: str) -> Path:
+    """`data/disclosures/<safe_charter_id>/` for one Charter's disclosures."""
+    d = disclosures_root() / _safe(charter_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def disclosure_path(charter_id: str, disclosure_id: str) -> Path:
+    """Per-disclosure JSON file path. `disclosure_id` is treated as
+    untrusted input so we route it through `_safe` to neutralise
+    `..`/separators before any filesystem call."""
+    return disclosures_dir(charter_id) / f"{_safe(disclosure_id)}.json"
 
 
 # ---------------------------------------------------------------------------
@@ -180,3 +209,60 @@ def ensure_issuer_key(principal_id: str) -> Ed25519PrivateKey:
     private, _ = generate_keypair()
     save_private_key(private, path)
     return private
+
+
+# ---------------------------------------------------------------------------
+# Disclosure I/O (ADR-011 path 1)
+# ---------------------------------------------------------------------------
+
+
+def save_disclosure(charter_id: str, disclosure: Disclosure) -> Path:
+    """Persist one Disclosure under `data/disclosures/<charter>/<id>.json`.
+
+    Plaintext on disk is intentional — the file system is the trust
+    boundary for ADR-011 path 1. Operators are expected to mount this
+    directory only on hosts that already hold the issuer's private key,
+    so anyone able to read the disclosure could already sign new
+    Charters anyway.
+    """
+    path = disclosure_path(charter_id, disclosure.disclosure_id)
+    path.write_text(disclosure.model_dump_json(indent=2), encoding="utf-8")
+    return path
+
+
+def load_disclosure(charter_id: str, disclosure_id: str) -> Disclosure | None:
+    """Load one Disclosure record, or None if absent.
+
+    The bearer-token-gated server endpoint at
+    `GET /disclosures/{charter_id}/{disclosure_id}` is the only
+    runtime caller. Returns None for both "no such file" and "file
+    exists but is corrupt"; the endpoint translates either into the
+    same 404 so an attacker without the token cannot use response
+    shape to distinguish the two.
+    """
+    path = disclosure_path(charter_id, disclosure_id)
+    if not path.exists():
+        return None
+    try:
+        return Disclosure.model_validate_json(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def load_disclosures(charter_id: str) -> list[Disclosure]:
+    """Load every Disclosure stored for one Charter, sorted by file name.
+
+    Used by issuer-side tooling that wants to inspect or re-publish
+    every disclosure at once (CLI dumps, audit). The runtime server
+    endpoint uses `load_disclosure` for single records.
+    """
+    out: list[Disclosure] = []
+    root = disclosures_root() / _safe(charter_id)
+    if not root.exists():
+        return out
+    for p in sorted(root.glob("*.json")):
+        try:
+            out.append(Disclosure.model_validate_json(p.read_text(encoding="utf-8")))
+        except Exception:
+            continue
+    return out
