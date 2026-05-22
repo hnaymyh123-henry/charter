@@ -431,3 +431,227 @@ async def test_disclosures_endpoint_404_when_id_unknown_but_token_correct(
             headers={"Authorization": "Bearer secret-token-abc"},
         )
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Path-traversal regression cases (QA PR #35 HIGH finding)
+#
+# Each case wires up a "legit" charter + disclosure under one charter_id,
+# then attempts to read a disclosure from a DIFFERENT charter_id using
+# various encodings of `..` / path separators. The expected behaviour is
+# 404 on every attempt — and the body must NEVER contain the legit
+# disclosure's span_value (which would indicate the traversal succeeded).
+# ---------------------------------------------------------------------------
+
+
+def _seed_two_charter_disclosures(tmp_data: Path) -> tuple[str, str, str, str]:
+    """Plant a "legit" disclosure under charter_legit/ and a "target"
+    disclosure under charter_target/. Return (legit_charter, legit_id,
+    target_charter, target_value) so each traversal test can assert that
+    a request scoped to `charter_legit` cannot read `charter_target`'s
+    plaintext."""
+    from charter.privacy import Disclosure as _D
+    from charter.storage import disclosures_root, save_disclosure
+
+    legit_charter = "charter_legit"
+    target_charter = "charter_target"
+    legit_disc = _D(
+        disclosure_id="legit_id",
+        span_value="LEGIT_PUBLIC",
+        salt_hex="00" * 16,
+        disclosure_hash="sha256:" + "a" * 64,
+    )
+    target_disc = _D(
+        disclosure_id="leak",
+        span_value="SHOULD_NOT_LEAK",
+        salt_hex="ff" * 16,
+        disclosure_hash="sha256:" + "b" * 64,
+    )
+    save_disclosure(legit_charter, legit_disc)
+    save_disclosure(target_charter, target_disc)
+    # Sanity: both files actually exist on disk before we attack.
+    assert (disclosures_root() / legit_charter / "legit_id.json").exists()
+    assert (disclosures_root() / target_charter / "leak.json").exists()
+    return legit_charter, "legit_id", target_charter, "SHOULD_NOT_LEAK"
+
+
+@pytest.mark.asyncio
+async def test_path_traversal_url_encoded_backslash_blocked(
+    client: AsyncClient, temp_data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Original PoC from QA report: `..%5C` (Windows backslash + ..)
+    must NOT cross charter_id boundaries on any OS."""
+    monkeypatch.setenv("CHARTER_DISCLOSURE_TOKEN", "secret-token-abc")
+    legit, _, target, target_value = _seed_two_charter_disclosures(temp_data_dir)
+
+    async with client as ac:
+        r = await ac.get(
+            f"/disclosures/{legit}/..%5C{target}%5Cleak",
+            headers={"Authorization": "Bearer secret-token-abc"},
+        )
+    assert r.status_code == 404
+    # If the traversal succeeded we'd see the target plaintext in the body.
+    assert target_value not in r.text
+
+
+@pytest.mark.asyncio
+async def test_path_traversal_url_encoded_forward_slash_blocked(
+    client: AsyncClient, temp_data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`..%2F` (POSIX-style traversal) must also not work."""
+    monkeypatch.setenv("CHARTER_DISCLOSURE_TOKEN", "secret-token-abc")
+    legit, _, target, target_value = _seed_two_charter_disclosures(temp_data_dir)
+
+    async with client as ac:
+        r = await ac.get(
+            f"/disclosures/{legit}/..%2F{target}%2Fleak",
+            headers={"Authorization": "Bearer secret-token-abc"},
+        )
+    assert r.status_code == 404
+    assert target_value not in r.text
+
+
+@pytest.mark.asyncio
+async def test_path_traversal_null_byte_blocked(
+    client: AsyncClient, temp_data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Null byte injection (some older filesystems truncate filenames at
+    \\x00) must not leak any disclosure."""
+    monkeypatch.setenv("CHARTER_DISCLOSURE_TOKEN", "secret-token-abc")
+    legit, _, _, target_value = _seed_two_charter_disclosures(temp_data_dir)
+
+    async with client as ac:
+        # %00 is the URL-encoded null byte. Some servers reject this at
+        # the parser layer; if so the assertion below still holds (404 +
+        # no leak), but if it makes it through to Python `_safe` strips
+        # it via the allowlist.
+        r = await ac.get(
+            f"/disclosures/{legit}/legit_id%00.json",
+            headers={"Authorization": "Bearer secret-token-abc"},
+        )
+    # Either 404 from our handler OR a parser-level rejection (4xx) — both
+    # acceptable, the load-bearing assertion is that no plaintext leaks.
+    assert r.status_code in (400, 404, 422)
+    assert target_value not in r.text
+
+
+@pytest.mark.asyncio
+async def test_path_traversal_absolute_path_attempt_blocked(
+    client: AsyncClient, temp_data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An attacker who supplies what looks like an absolute path
+    (`/etc/passwd`, `C:\\Windows\\System32`) must not escape the
+    disclosures directory or read arbitrary files."""
+    monkeypatch.setenv("CHARTER_DISCLOSURE_TOKEN", "secret-token-abc")
+    legit, _, _, target_value = _seed_two_charter_disclosures(temp_data_dir)
+
+    async with client as ac:
+        # POSIX-style absolute
+        r1 = await ac.get(
+            f"/disclosures/{legit}/%2Fetc%2Fpasswd",
+            headers={"Authorization": "Bearer secret-token-abc"},
+        )
+        # Windows-style absolute
+        r2 = await ac.get(
+            f"/disclosures/{legit}/C%3A%5CWindows%5CSystem32",
+            headers={"Authorization": "Bearer secret-token-abc"},
+        )
+    assert r1.status_code == 404
+    assert r2.status_code == 404
+    # Body must not contain anything that looks like /etc/passwd or
+    # a registry path, and must not leak the target disclosure either.
+    assert "root:" not in r1.text  # canonical /etc/passwd marker
+    assert target_value not in r1.text
+    assert target_value not in r2.text
+
+
+@pytest.mark.asyncio
+async def test_path_traversal_double_encoded_blocked(
+    client: AsyncClient, temp_data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Double URL-encoded traversal (`..%252F`) — `%25` is `%`, so the
+    naive decoder produces `..%2F` and then `../`. Must still 404 because
+    `%` is outside our allowlist and gets replaced by `_`."""
+    monkeypatch.setenv("CHARTER_DISCLOSURE_TOKEN", "secret-token-abc")
+    legit, _, target, target_value = _seed_two_charter_disclosures(temp_data_dir)
+
+    async with client as ac:
+        r = await ac.get(
+            f"/disclosures/{legit}/..%252F{target}%252Fleak",
+            headers={"Authorization": "Bearer secret-token-abc"},
+        )
+    assert r.status_code == 404
+    assert target_value not in r.text
+
+
+# ---------------------------------------------------------------------------
+# Unit-level _safe() boundary cases
+# ---------------------------------------------------------------------------
+
+
+def test_safe_rejects_empty_input() -> None:
+    """Empty or whitespace-only input must raise rather than silently
+    returning a falsy segment (which would let an attacker control which
+    directory is opened)."""
+    from charter.storage import _safe
+
+    with pytest.raises(ValueError):
+        _safe("")
+    with pytest.raises(ValueError):
+        _safe("   ")
+    with pytest.raises(ValueError):
+        _safe("\t\n")
+
+
+def test_safe_neutralises_path_separators_and_traversal() -> None:
+    """Comprehensive char-class regression for the allowlist."""
+    from charter.storage import _safe
+
+    # Forward and backward slashes both gone
+    assert "/" not in _safe("a/b")
+    assert "\\" not in _safe("a\\b")
+    # Literal `..` segment becomes `__` (special-cased so the resulting
+    # segment is not equal to the parent-dir marker)
+    assert _safe("..") == "__"
+    # Literal `.` segment becomes `_`
+    assert _safe(".") == "_"
+    # Null byte gone
+    assert "\x00" not in _safe("legit\x00.json")
+    # Unicode RTL override (U+202E) gone — sometimes used to disguise
+    # file extensions in path-display attacks
+    assert "‮" not in _safe("name‮gpj.exe")
+    # Allowlisted chars survive untouched
+    assert _safe("abc-123.json_v2") == "abc-123.json_v2"
+
+
+def test_safe_back_compat_for_existing_charter_ids() -> None:
+    """`:` and `@` must still be mapped to underscores so existing
+    charter_id formats (charter:principal@domain:agent:date) keep
+    resolving to the same on-disk filenames as before."""
+    from charter.storage import _safe
+
+    safe = _safe("charter:alice@acme.com:agent:2026-05-22")
+    assert ":" not in safe
+    assert "@" not in safe
+    # Every allowlisted char survives; everything else is `_`.
+    assert safe == "charter_alice_acme.com_agent_2026-05-22"
+
+
+def test_disclosure_path_resolved_under_disclosures_root(tmp_path: Path) -> None:
+    """The boundary check in disclosure_path() must accept legitimate
+    paths and reject anything that resolves outside disclosures_root."""
+    import os
+
+    os.environ["CHARTER_DATA_DIR"] = str(tmp_path)
+    try:
+        from charter.storage import disclosure_path, disclosures_root
+
+        # Legitimate path: stays under root.
+        p = disclosure_path("charter_a", "disclosure_1")
+        assert p.resolve().is_relative_to(disclosures_root().resolve())
+        # Even pathological inputs that _safe collapses to weird-but-
+        # in-bounds names must still resolve under root.
+        p2 = disclosure_path("..", "..")
+        assert p2.resolve().is_relative_to(disclosures_root().resolve())
+    finally:
+        os.environ.pop("CHARTER_DATA_DIR", None)
