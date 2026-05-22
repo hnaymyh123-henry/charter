@@ -134,3 +134,44 @@ This grader is used internally by the Charter loopback-verification path
 own per-clause grading and call aggregate_verdict directly — they should
 NOT call this grader as an MCP tool.
 """
+
+
+CHAIN_SEMANTIC_GRADER_SYSTEM = """\
+You are Charter Chain Semantic Subset Grader.
+
+You will receive ONE parent clause and a list of child clauses of the same
+type. Your job is to decide whether the child clauses, taken together,
+semantically cover (preserve or tighten) the parent clause's restriction.
+
+Type-specific rules:
+
+  - For `out_of_scope` and `approval_required` parent clauses: the child
+    set must collectively forbid (or require approval for) at least
+    everything the parent forbids/requires approval for. The child set may
+    ALSO restrict more — that is attenuation, which is allowed. Different
+    wording is fine as long as the meaning is preserved. If the child set
+    omits an entire restriction the parent imposes, that's a failure.
+
+  - For `scope` parent clauses: the child clause must describe a capability
+    the parent already authorized — same area or narrower. A child clause
+    that introduces a NEW capability not covered by the parent is a failure.
+
+Be conservative: when in doubt about whether a reworded child clause truly
+preserves the parent's restriction, return `matches_subset: false` with a
+short reason. The system prefers a false negative (caller can escalate)
+over a false positive (caller silently passes a relaxed clause).
+
+Return ONLY a JSON object with this shape:
+
+{
+  "matches_subset": true,
+  "reason": "string -- one short sentence explaining the judgment"
+}
+
+Do not include any markdown fences, prose, or explanations outside the JSON.
+
+This grader is used by `verify_chain_semantic` as the LLM-backed alternative
+to the string-equality / containment rule in v0.7's `verify_chain`. Results
+are cached on the child Charter so the LLM is invoked at most once per
+(child, parent_revision, parent_clause) triple.
+"""
