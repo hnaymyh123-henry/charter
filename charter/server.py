@@ -28,13 +28,13 @@ from collections.abc import Iterator
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from . import transparency
 from .constants import DEFAULT_URL_BASE
 from .signing import public_key_to_jwk
-from .storage import list_charters, list_known_issuer_keys, load_charter
+from .storage import list_charters, list_known_issuer_keys, load_charter, load_disclosure
 
 app = FastAPI(title="Charter Service", version="0.1.0")
 
@@ -44,6 +44,42 @@ def _self_hosted_principal() -> str | None:
     if the server is running in the default multi-tenant mode."""
     value = os.environ.get("CHARTER_SELF_HOSTED_PRINCIPAL", "").strip()
     return value or None
+
+
+def _disclosure_token() -> str | None:
+    """Return the configured Disclosure bearer token, or None if unset.
+
+    Empty / whitespace-only env -> None -> every `/disclosures/...`
+    request returns 404. Operating without a token is the safe default:
+    without `CHARTER_DISCLOSURE_TOKEN` configured the issuer simply
+    does not expose ADR-011 plaintexts over HTTP, even if Disclosure
+    files sit on disk.
+    """
+    raw = os.environ.get("CHARTER_DISCLOSURE_TOKEN", "").strip()
+    return raw or None
+
+
+def _authorize_disclosure_or_404(authorization: str | None) -> None:
+    """Bearer-token check for `/disclosures/...`.
+
+    Mismatches and missing tokens BOTH translate into a 404 (not 401)
+    so an attacker without the token cannot tell whether the endpoint
+    exists or which disclosure ids are valid. The cost of this choice
+    is that legitimate misconfigurations (e.g. operator forgot to set
+    the env var) also look like 404; this is documented in
+    PRODUCT.md §4.6.
+    """
+    expected = _disclosure_token()
+    if expected is None:
+        raise HTTPException(status_code=404, detail="disclosure not found")
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=404, detail="disclosure not found")
+    presented = authorization[len("Bearer ") :].strip()
+    # Constant-time compare to avoid timing oracles on the token.
+    import hmac
+
+    if not hmac.compare_digest(presented, expected):
+        raise HTTPException(status_code=404, detail="disclosure not found")
 
 
 @app.get("/healthz")
@@ -227,6 +263,38 @@ def transparency_proof(charter_id: str) -> dict[str, Any]:
         if entry.seq >= target.seq:
             break
     return {"entry": target.to_dict(), "chain": chain}
+
+
+@app.get("/disclosures/{charter_id:path}/{disclosure_id}")
+def get_disclosure(
+    charter_id: str,
+    disclosure_id: str,
+    authorization: str | None = Header(default=None),
+) -> JSONResponse:
+    """Return one ADR-011 path 1 Disclosure plaintext.
+
+    Auth: ``Authorization: Bearer <CHARTER_DISCLOSURE_TOKEN>``. The
+    env var is the entire access-control surface in v0.9 — there is
+    no per-disclosure ACL, no rotation, no audit log of who fetched
+    what. Operators that need finer-grained control should put a
+    reverse proxy in front.
+
+    Failure modes ALL return the same 404 body so an attacker without
+    the token cannot distinguish:
+      - env var unset / wrong token
+      - disclosure id never existed
+      - charter id never existed
+      - disclosure file on disk is corrupt
+
+    `charter_id` uses `{charter_id:path}` because the canonical
+    format `charter:principal:agent:date` contains colons that
+    FastAPI's default segment matcher rejects.
+    """
+    _authorize_disclosure_or_404(authorization)
+    disclosure = load_disclosure(charter_id, disclosure_id)
+    if disclosure is None:
+        raise HTTPException(status_code=404, detail="disclosure not found")
+    return JSONResponse(content=disclosure.model_dump(mode="json"))
 
 
 @app.get("/{principal_id}/{agent_id}")

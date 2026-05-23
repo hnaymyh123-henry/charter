@@ -29,6 +29,7 @@
 - **决策时间**:v0.x;v0.8 扩展 `transparency_log_id` 例外
 - **理由**:`transparency_log_id` 是 sign 之后才知道的 seq,要从 canonical 排除掉避免鸡生蛋
 - **影响**:任何新加字段**默认进入签名覆盖**,只有"必须在 sign 之后赋值"的字段才能 opt out
+- **v0.9 扩展(ADR-011 path 1)**:Disclosure 明文(`data/disclosures/<charter>/<id>.json`)从不进入 canonical bytes —— 只 `Clause.private_fields[].disclosure_hash` 进入。这样签名只承诺 hash,不承诺明文。同时为向后兼容,`Clause.private_fields == None` 时整个字段从 payload 中删除,保证 pre-ADR-011 Charter 的 canonical 字节与原签名一致。
 
 ---
 
@@ -98,11 +99,12 @@
 ## ADR-011 — 隐私层走分层方案,不一步到位
 
 - **决策(2026-05-22 讨论收敛)**:
-  - **path 1(PLANNED #6)**:redaction + SD-JWT,只遮蔽 clause text 里的敏感值,clause 结构和 type 保持公开;caller 的 LLM 仍能判 hit
+  - **path 1(SHIPPED v0.9,Issue #31)**:redaction + SD-JWT,只遮蔽 clause text 里的敏感值,clause 结构和 type 保持公开;caller 的 LLM 仍能判 hit
   - **path 2(留到 v1)**:delegated grading endpoint(server-side 跑 grading 只返回 verdict);需要给 protocol 加 optional "issuer 是 trusted grading oracle" 模式
   - **path 3(ZKP)**:留到 ZK + LLM 工程栈成熟,长期方向
 - **背景**:直接套 SD-JWT 会让被遮蔽 clause 在 caller 那边等同"不存在",反而不安全
-- **影响**:`visibility.private_clauses` 字段在 #6 合并前必须保持 `"not_supported_in_v0"`
+- **path 1 shipped 内容**:`Clause.private_fields: list[PrivateFieldRef] | None`、`Visibility.private_clauses` 字面量扩展为 `"not_supported_in_v0" | "redaction_v1"`、`charter/privacy.py` 4 个 helper(`redact_clause` / `verify_disclosure` / `match_redacted` / `Disclosure`)、`data/disclosures/<charter_id>/<disclosure_id>.json` 持久化、`GET /disclosures/{charter_id}/{disclosure_id}` bearer-token endpoint(`CHARTER_DISCLOSURE_TOKEN`)
+- **影响**:`Clause.private_fields` 默认为 None;`_canonical_bytes` 在 None 时删除该 key 保证向后兼容;disclosure 明文永不进 canonical bytes;path 2/3 编排同 ADR 保留
 
 ---
 

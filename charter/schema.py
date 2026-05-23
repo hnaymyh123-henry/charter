@@ -56,13 +56,50 @@ class AgentOperator(BaseModel):
 
 
 class Visibility(BaseModel):
+    """Per-Charter visibility declarations.
+
+    `private_clauses` widens with each shipped privacy path:
+
+      - `"not_supported_in_v0"` — pre-ADR-011. Every clause is rendered
+        in full; no per-span redaction.
+      - `"redaction_v1"` — ADR-011 path 1 (SHIPPED). Selected spans
+        inside `Clause.text` are replaced with `[REDACTED:<hash-prefix>]`
+        placeholders; the issuer publishes only the SHA-256 commitment
+        of each redacted value, not the value itself.
+
+    Future paths (delegated grading, ZKPs) will extend the literal
+    again. Charters issued before ADR-011 path 1 omit `private_fields`
+    on every clause and the field stays at the pre-existing default
+    string, so they continue to verify unchanged.
+    """
+
     charter: Literal["public"] = "public"
     raw_principal_context: Literal["private"] = "private"
-    private_clauses: Literal["not_supported_in_v0"] = "not_supported_in_v0"
+    private_clauses: Literal["not_supported_in_v0", "redaction_v1"] = "not_supported_in_v0"
 
 
 class Summary(BaseModel):
     plain_language: str
+
+
+class PrivateFieldRef(BaseModel):
+    """One span inside `Clause.text` that has been replaced with a
+    `[REDACTED:<hash-prefix>]` placeholder.
+
+    The span coordinates point INTO the redacted text (i.e. the text
+    that appears in the published Charter), so callers can locate the
+    placeholder without reconstructing the original. `disclosure_hash`
+    is the SHA-256 commitment of `salt || original_value` and is the
+    ONLY part of the redacted value that enters the signed canonical
+    bytes — the original value lives in a sibling Disclosure record
+    that the issuer chooses whether to reveal.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    span_start: int = Field(ge=0)
+    span_end: int = Field(ge=0)
+    disclosure_hash: str  # "sha256:<hex>"
 
 
 class Clause(BaseModel):
@@ -72,6 +109,14 @@ class Clause(BaseModel):
     `constants.TYPE_TO_DECISION`. The LLM only judges whether the clause is hit
     by the intended task; it does NOT decide allow/needs_approval/incompatible
     on its own.
+
+    When `private_fields` is set (ADR-011 path 1), the clause's `text`
+    already contains `[REDACTED:<hash-prefix>]` placeholders in place
+    of the sensitive spans. Each `PrivateFieldRef` carries the SHA-256
+    commitment of the redacted value; the matching plaintext lives in
+    a Disclosure file gated behind `CHARTER_DISCLOSURE_TOKEN`. Older
+    Charters omit this field entirely (None) and continue to sign /
+    verify without modification.
     """
 
     id: str
@@ -84,6 +129,7 @@ class Clause(BaseModel):
         "data_handling",
     ]
     text: str
+    private_fields: list[PrivateFieldRef] | None = None
 
 
 # ---------------------------------------------------------------------------

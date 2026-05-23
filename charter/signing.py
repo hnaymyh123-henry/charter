@@ -218,10 +218,27 @@ def _canonical_bytes(charter: Charter) -> bytes:
     written AFTER the signature is final (chicken-and-egg). JSON is
     written with sorted keys and no whitespace, which is enough for v0;
     a formal canonical-JSON spec is out of scope (see future work).
+
+    ADR-011 path 1 (privacy / redaction) adds one more exclusion rule:
+    the matching Disclosure plaintexts NEVER enter the canonical bytes.
+    The Charter only ever holds `disclosure_hash` commitments inside
+    `Clause.private_fields`, so the signature commits to "this clause
+    contained a value whose SHA-256 was X" but reveals nothing about
+    X itself. Backward compatibility for pre-ADR-011 Charters is
+    preserved by dropping `private_fields` from each clause when it is
+    None — otherwise Pydantic would serialise `"private_fields": null`
+    and break verification of every Charter signed before this field
+    existed.
     """
     payload = charter.model_dump(mode="json")
     payload["provenance"]["issuer_signature"] = ""
     payload["provenance"]["transparency_log_id"] = None
+    # Backward-compat: pre-ADR-011 Charters have no `private_fields`
+    # key at all. We drop None occurrences so the canonical bytes are
+    # byte-identical to what those Charters signed originally.
+    for clause in payload.get("clauses", []):
+        if clause.get("private_fields") is None:
+            clause.pop("private_fields", None)
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
 
 
