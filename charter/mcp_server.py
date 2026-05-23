@@ -940,6 +940,82 @@ def aggregate_verdict_chain(
     return verdict.model_dump(mode="json")
 
 
+# ---------------------------------------------------------------------------
+# Tool 11: verify_chain_semantic (LLM-using; per ADR-009 declared explicitly)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def verify_chain_semantic(
+    child_charter_url: str,
+    parent_charter_url: str,
+) -> dict[str, Any]:
+    """LLM-based semantic subset check between two fetched Charters.
+
+    **LLM-using tool (ADR-009 exception).** Unlike `verify_chain` in
+    strict mode (which is pure string matching), this tool calls the
+    Anthropic API one or more times to ask whether each parent
+    restriction is semantically covered by the child's clauses. Use
+    this when string-based `fetch_charter_chain` rejects a child that
+    is *known* to be a legitimate reword of its parent.
+
+    Determinism note: results are written into
+    `child.attenuation_proof.semantic_check_cache` so subsequent calls
+    against the same (child, parent_revision) pair short-circuit
+    without invoking the LLM. The MCP server does NOT hold the issuer
+    private key, so the in-memory cache update CANNOT be persisted +
+    re-signed at this layer — callers that want a signed cache must
+    use the Python API (`charter.chain.verify_chain_semantic` with a
+    `signer_private_key`) on the issuer side.
+
+    Args:
+        child_charter_url:  URL of the (claimed) attenuating Charter.
+        parent_charter_url: URL of the parent Charter.
+
+    Returns:
+        Success:
+            {"ok": true, "matches_subset": bool, "reason": str,
+             "cache_key": str}
+        Grader / fetch failure:
+            {"ok": false, "reason": str}
+    """
+    from .chain import _semantic_cache_key
+    from .chain import verify_chain_semantic as _verify_semantic
+    from .errors import CharterChainGraderError
+
+    try:
+        child = _fetch_and_verify(child_charter_url)
+        parent = _fetch_and_verify(parent_charter_url)
+    except Exception as e:
+        return {"ok": False, "reason": f"{type(e).__name__}: {e}"}
+
+    try:
+        # No signer_private_key: the MCP layer can't sign, so the cache
+        # entry lives only in this response — callers are expected to
+        # round-trip back to the issuer if they want it persisted.
+        matches = _verify_semantic(child, parent, grader_client=None)  # type: ignore[arg-type]
+    except CharterChainGraderError as e:
+        return {"ok": False, "reason": f"grader_failure: {e}"}
+    except ValueError as e:
+        # Raised when no grader_client was passed AND ANTHROPIC_API_KEY is
+        # missing. Surface as a clean degraded response.
+        return {"ok": False, "reason": str(e)}
+
+    cache_key = _semantic_cache_key(parent)
+    # After the call we know the verdict was just written into the cache
+    # (or fetched from it); read the reason back to surface to the caller.
+    assert child.attenuation_proof is not None  # verify_chain_semantic ensures this
+    cached = child.attenuation_proof.semantic_check_cache.get(cache_key)
+    reason = cached.reason if cached is not None else ""
+
+    return {
+        "ok": True,
+        "matches_subset": matches,
+        "reason": reason,
+        "cache_key": cache_key,
+    }
+
+
 def _chain_failure(reason: str, walked_leaf_first: list[Charter]) -> dict[str, Any]:
     """Emit a failure log + build the partial-chain response."""
     partial = list(reversed(walked_leaf_first))

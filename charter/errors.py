@@ -82,6 +82,18 @@ class JWKSParseError(CharterError):
     JWKS document. Raised by `fetch_jwks`."""
 
 
+class CharterChainGraderError(CharterError):
+    """Raised when the semantic grader call fails (timeout, malformed JSON,
+    etc.). Wraps Anthropic network errors, timeouts, and unparseable /
+    schema-noncompliant JSON output.
+
+    Propagates to the caller in both `semantic` and `auto` modes of
+    `verify_chain` — callers decide whether to retry, fall back, or
+    surface the error. `verify_chain_semantic` does NOT silently fall
+    back to string mode on grader failure, and `auto` mode does NOT
+    swallow this exception to re-promote a string failure into a pass."""
+
+
 __all__ = [
     "CharterError",
     "CharterNotFoundError",
@@ -93,4 +105,5 @@ __all__ = [
     "CharterPinMismatchError",
     "JWKSNotFoundError",
     "JWKSParseError",
+    "CharterChainGraderError",
 ]
