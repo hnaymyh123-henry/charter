@@ -24,6 +24,7 @@ import httpx
 
 from ._logging import get_logger
 from .errors import JWKSNotFoundError, JWKSParseError
+from .observability import charter_span_cm, set_span_attrs
 
 _log = get_logger("charter.keys")
 
@@ -67,16 +68,47 @@ def fetch_jwks(issuer_origin: str) -> dict[str, dict[str, str]]:
     Raises:
         JWKSNotFoundError: network failure or non-2xx HTTP response.
         JWKSParseError:    body is not a valid JWKS document.
+
+    Emits one `charter.fetch_jwks` OTel span per call with
+    `charter.jwks_cache_hit` and `charter.jwks_key_count` attributes
+    when OTel is installed.
     """
     origin = issuer_origin.rstrip("/")
 
-    cached = _cache.get(origin)
-    if cached is not None:
-        fetched_at, keys = cached
-        if time.monotonic() - fetched_at < _cache_ttl_seconds():
-            _log.debug("jwks cache hit", extra={"origin": origin, "outcome": "cache_hit"})
-            return keys
+    with charter_span_cm(
+        "charter.fetch_jwks",
+        {"charter.issuer_origin": origin},
+    ) as span:
+        cached = _cache.get(origin)
+        if cached is not None:
+            fetched_at, keys = cached
+            if time.monotonic() - fetched_at < _cache_ttl_seconds():
+                _log.debug("jwks cache hit", extra={"origin": origin, "outcome": "cache_hit"})
+                set_span_attrs(
+                    span,
+                    {
+                        "charter.jwks_cache_hit": True,
+                        "charter.jwks_key_count": len(keys),
+                        "charter.verdict": "ok",
+                    },
+                )
+                return keys
 
+        set_span_attrs(span, {"charter.jwks_cache_hit": False})
+        keys_fetched = _fetch_jwks_uncached(origin)
+        set_span_attrs(
+            span,
+            {
+                "charter.jwks_key_count": len(keys_fetched),
+                "charter.verdict": "ok",
+            },
+        )
+        return keys_fetched
+
+
+def _fetch_jwks_uncached(origin: str) -> dict[str, dict[str, str]]:
+    """The original network + parse path, kept verbatim. Splitting it out
+    keeps the span wrapper above readable; semantics are unchanged."""
     url = f"{origin}/.well-known/jwks.json"
     try:
         resp = httpx.get(url, timeout=10.0)
