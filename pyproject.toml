@@ -62,11 +62,21 @@ observability = [
 inspector = [
     "jinja2>=3.1",
 ]
+# `pip install charter[postgres_proxy]` to use the
+# `charter.adapters.postgres` capability-boundary reference proxy.
+# asyncpg is only needed by the integration test fixture (to drive a
+# real PG behind the proxy); sqlglot is the runtime dependency that
+# powers SQL intent extraction.
+postgres_proxy = [
+    "sqlglot>=24.0",
+    "asyncpg>=0.29",
+]
 
 [project.scripts]
 charter = "charter.cli:main"
 charter-mcp = "charter.mcp_server:run"
 charter-server = "charter.server:run"
+charter-pg-proxy = "charter.adapters.postgres.proxy:run"
 
 [build-system]
 requires = ["hatchling"]
@@ -86,6 +96,9 @@ packages = ["charter"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "requires_postgres: test requires a real Postgres instance (e.g. via docker / testcontainers); skipped if unavailable",
+]
 
 [tool.ruff]
 line-length = 100
