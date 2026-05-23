@@ -154,26 +154,31 @@ def disclosure_path(charter_id: str, disclosure_id: str) -> Path:
          ``..``, ``/``, ``\\``, null bytes, control chars, percent-decoded
          path separators FastAPI hands us as raw bytes).
       2. After joining, the result is resolved and verified to live
-         under ``disclosures_root()``. If a future change to ``_safe``
-         or the join logic ever lets a traversal slip through, this
-         check raises ``ValueError`` rather than returning a path that
-         escapes the disclosures directory.
+         under the **per-charter** directory ``disclosures_dir(charter_id)``,
+         not merely under the global ``disclosures_root()``. This
+         tightens belt-and-suspenders so that even if ``_safe`` ever
+         regresses, a request like ``charter_b/../charter_a/leak``
+         (whose resolved path would still sit under
+         ``data/disclosures/``) is rejected because it escapes the
+         specific charter's subdirectory.
 
     Caller (``load_disclosure`` / server endpoint) catches the
     ``ValueError`` and translates to the same 404 every other failure
     mode returns, so the attacker cannot use response shape to
     distinguish "valid id, missing file" from "traversal blocked".
     """
-    candidate = disclosures_dir(charter_id) / f"{_safe(disclosure_id)}.json"
+    charter_dir = disclosures_dir(charter_id)
+    candidate = charter_dir / f"{_safe(disclosure_id)}.json"
     # Final boundary check — even if `_safe` ever regresses, the
-    # resolved path must live under disclosures_root(). `resolve()`
-    # collapses any residual `..` segments; `is_relative_to` is the
-    # 3.9+ replacement for the older try/except-on-relative_to idiom.
-    root = disclosures_root().resolve()
+    # resolved path must live under THIS charter's subdirectory, not
+    # merely under disclosures_root(). `resolve()` collapses any
+    # residual `..` segments; `is_relative_to` is the 3.9+ replacement
+    # for the older try/except-on-relative_to idiom.
+    charter_root = charter_dir.resolve()
     resolved = candidate.resolve()
-    if not resolved.is_relative_to(root):
+    if not resolved.is_relative_to(charter_root):
         raise ValueError(
-            f"disclosure path escapes disclosures_root: "
+            f"disclosure path escapes charter directory: "
             f"charter_id={charter_id!r}, disclosure_id={disclosure_id!r}"
         )
     return candidate
