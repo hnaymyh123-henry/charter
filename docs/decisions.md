@@ -55,8 +55,8 @@
 
 - **决策**:协议描述为 *"对于配合的 calling agent,提供低成本可审计的委托决策"*。明确**不**承诺对恶意 calling agent 的保护
 - **决策时间**:v0.x(PRODUCT.md §5.6)
-- **演进**:**A8 Postgres reference adapter** 将探索 capability-boundary 模式,但不改变 v0.x 的协议级声明
-- **影响**:文档与协议声明必须保持一致 ——"voluntary protocol"措辞不可弱化
+- **演进**:**A8 Postgres reference adapter v0.9 SHIPPED**(`charter.adapters.postgres`)—— 在 reference 级别落地 capability-boundary 模式,把同一 `aggregate_verdict` 原语放到 resource 侧强制执行。这**不**改变协议本身的 voluntary 立场;协议仍然不强制任何 enforcement 层,reference adapter 只是给愿意做强制的部署方一个可移植模板(~600 LOC,fail-closed everywhere)
+- **影响**:文档与协议声明必须保持一致 ——"voluntary protocol"措辞不可弱化。Reference adapter 的存在仅作为 pattern proof,不进入协议规范
 
 ---
 

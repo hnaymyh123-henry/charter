@@ -651,6 +651,20 @@ The honest claim Charter v0 makes: *"for calling agents that follow the
 protocol, here is a stable, low-cost, auditable way to decide whether
 to delegate."*
 
+**v0.9 update — Capability-Boundary reference adapter.** A reference
+Capability-Boundary adapter for Postgres ships in v0.9
+(`charter.adapters.postgres`) as a proof of pattern. The reference
+proxy sits in front of a real Postgres, sniffs every SQL statement
+with sqlglot, and refuses any statement that does not satisfy the
+Charter check — using the *same* `aggregate_verdict` primitive a
+calling agent runs, just enforced one layer closer to the resource.
+This does **not** change the voluntary nature of the protocol itself:
+third-party deployments still choose whether to install the adapter,
+and Charter still does not require an enforcement layer to be useful.
+What the reference does ship is a template: ~600 LOC, fail-closed
+everywhere, designed to be ported to Stripe / S3 / arbitrary tool
+runtimes by anyone who wants the stronger guarantee.
+
 ### 5.7 Why `propose_within_scope` is part of the protocol
 
 A naive Charter that only returned `allow / needs_approval / incompatible`
