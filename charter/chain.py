@@ -47,6 +47,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from ._logging import get_logger
 from .errors import CharterChainGraderError
+from .observability import charter_span_cm, set_span_attrs
 from .schema import AttenuationProof, Charter, Clause, SemanticCheckResult
 
 _log = get_logger("charter.chain")
@@ -152,39 +153,57 @@ def verify_chain(
             without a `grader_client` and no `ANTHROPIC_API_KEY` to build
             one.
     """
-    if mode == "strict":
-        return _verify_chain_strict(child, parent)
+    with charter_span_cm(
+        "charter.verify_chain",
+        {
+            "charter.id": child.charter_id,
+            "charter.parent_id": parent.charter_id,
+            "charter.mode": mode,
+        },
+    ) as span:
+        if mode == "strict":
+            ok = _verify_chain_strict(child, parent)
+            set_span_attrs(span, {"charter.verdict": "ok" if ok else "rejected"})
+            return ok
 
-    if mode == "semantic":
-        return verify_chain_semantic(
-            child,
-            parent,
-            grader_client=_resolve_grader(grader_client),
-            signer_private_key=signer_private_key,
-        )
+        if mode == "semantic":
+            ok = verify_chain_semantic(
+                child,
+                parent,
+                grader_client=_resolve_grader(grader_client),
+                signer_private_key=signer_private_key,
+            )
+            set_span_attrs(span, {"charter.verdict": "ok" if ok else "rejected"})
+            return ok
 
-    if mode == "auto":
-        if _verify_chain_strict(child, parent):
-            return True
-        # String path rejected. Either the child genuinely relaxes
-        # something OR it just rewords the parent's clauses. Fall back
-        # to the LLM grader to disambiguate.
-        _log.info(
-            "string check failed; falling back to semantic grader",
-            extra={
-                "child_charter_id": child.charter_id,
-                "parent_charter_id": parent.charter_id,
-                "outcome": "auto_fallback",
-            },
-        )
-        return verify_chain_semantic(
-            child,
-            parent,
-            grader_client=_resolve_grader(grader_client),
-            signer_private_key=signer_private_key,
-        )
+        if mode == "auto":
+            if _verify_chain_strict(child, parent):
+                set_span_attrs(span, {"charter.verdict": "ok", "charter.via": "strict"})
+                return True
+            # String path rejected. Either the child genuinely relaxes
+            # something OR it just rewords the parent's clauses. Fall back
+            # to the LLM grader to disambiguate.
+            _log.info(
+                "string check failed; falling back to semantic grader",
+                extra={
+                    "child_charter_id": child.charter_id,
+                    "parent_charter_id": parent.charter_id,
+                    "outcome": "auto_fallback",
+                },
+            )
+            ok = verify_chain_semantic(
+                child,
+                parent,
+                grader_client=_resolve_grader(grader_client),
+                signer_private_key=signer_private_key,
+            )
+            set_span_attrs(
+                span, {"charter.verdict": "ok" if ok else "rejected", "charter.via": "semantic"}
+            )
+            return ok
 
-    raise ValueError(f"verify_chain: unknown mode {mode!r}")
+        set_span_attrs(span, {"charter.verdict": "unknown_mode"})
+        raise ValueError(f"verify_chain: unknown mode {mode!r}")
 
 
 def _verify_chain_strict(child: Charter, parent: Charter) -> bool:

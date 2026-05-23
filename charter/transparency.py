@@ -56,6 +56,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ._logging import get_logger
+from .observability import charter_span_cm, set_span_attrs
 from .schema import Charter
 from .storage import data_root
 
@@ -184,7 +185,32 @@ def append(charter: Charter) -> TransparencyEntry:
     the chain hashes — NOT the Charter body. The function is idempotent
     on `charter_id`: re-appending the same Charter is a no-op and returns
     the existing entry, so retries after a crash are safe.
+
+    Emits one `charter.transparency_append` OTel span per call with
+    `charter.id` / `charter.seq` / `charter.verdict` attributes when
+    OTel is installed.
     """
+    with charter_span_cm(
+        "charter.transparency_append",
+        {"charter.id": charter.charter_id},
+    ) as span:
+        # Pre-check duplicate so the verdict is accurate. If the entry
+        # already exists, _append_impl returns it as-is (idempotent).
+        was_duplicate = get_entry(charter.charter_id) is not None
+        entry = _append_impl(charter)
+        set_span_attrs(
+            span,
+            {
+                "charter.seq": entry.seq,
+                "charter.verdict": "duplicate" if was_duplicate else "appended",
+            },
+        )
+        return entry
+
+
+def _append_impl(charter: Charter) -> TransparencyEntry:
+    """Inner implementation. Span wrapper above captures the seq + verdict
+    cleanly without indenting the whole body. Semantics unchanged."""
     existing = get_entry(charter.charter_id)
     if existing is not None:
         _log.info(
