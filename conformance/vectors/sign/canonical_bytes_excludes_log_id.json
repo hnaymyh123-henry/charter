@@ -2,7 +2,7 @@
   "expected_error": null,
   "expected_output": {
     "must_be_equal": true,
-    "post_sha256": "sha256:2d0c201ff848d4509474d0db4c8869bae77416785631a5904d65953375f0727d",
+    "post_sha256": "sha256:3c4e5d02875686a8f07b80f628e550d3880c9ec3629d7922fffdec00ad17fb74",
     "pre_sha256": "sha256:3c4e5d02875686a8f07b80f628e550d3880c9ec3629d7922fffdec00ad17fb74"
   },
   "input": {

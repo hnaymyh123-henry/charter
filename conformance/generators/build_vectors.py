@@ -248,14 +248,18 @@ def gen_sign_vectors() -> None:
         },
     )
 
-    # 4. Canonical bytes exclude issuer_signature AND transparency_log_id.
-    pre_sign = _make_charter(public_str)
-    pre_payload = _canonical_bytes(pre_sign)
-    _sign_without_log(pre_sign, private)
-    # Now set transparency_log_id post-sign and recompute canonical — it must
-    # be identical (because canonical bytes clear that field).
-    pre_sign.provenance.transparency_log_id = 42
-    post_payload = _canonical_bytes(pre_sign)
+    # 4. Canonical bytes exclude transparency_log_id. We compare two
+    # Charters identical except one has transparency_log_id=null and the
+    # other has it=42; both must hash identically because _canonical_bytes
+    # clears the field before serialising.
+    pre = _make_charter(public_str)
+    pre_payload = _canonical_bytes(pre)
+    post = _make_charter(public_str)
+    post.provenance.transparency_log_id = 42
+    post_payload = _canonical_bytes(post)
+    assert pre_payload == post_payload, (
+        "regression: transparency_log_id assignment leaked into canonical bytes"
+    )
     _write_vector(
         "sign",
         "canonical_bytes_excludes_log_id.json",
@@ -264,7 +268,7 @@ def gen_sign_vectors() -> None:
             "spec_section": "SPEC.md#11-field-exclusions",
             "input": {
                 "operation": "canonical_bytes_invariant_check",
-                "charter_pre_assign": _charter_to_jsonable(_make_charter(public_str)),
+                "charter_pre_assign": _charter_to_jsonable(pre),
                 "charter_post_assign_log_id": 42,
             },
             "expected_output": {
