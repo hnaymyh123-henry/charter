@@ -5,6 +5,24 @@ All notable changes to Charter are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Charter Inspector Web UI (B3.8)** — `GET /inspect?url=<charter_url>` and
+  `GET /inspect/{principal}/{agent}` render a fetched Charter as a
+  human-readable HTML page with status badge, foldable clause list (Alpine.js),
+  signature / pin / JWKS / lifecycle / transparency verify panel, chain tree
+  for `parent_charter_url`, and unified-diff vs `lifecycle.replaces`. The
+  inspector reuses `mcp_server._fetch_and_verify` for every URL it touches,
+  so JWKS / pin / lifecycle / signature checks run on every hop (ADR-007).
+  Pulls jinja2 + HTMX + Alpine.js from CDN; jinja2 ships in the new
+  `[project.optional-dependencies] inspector` group (`pip install
+  charter[inspector]`). Without the extra, `/inspect` returns a 503 with an
+  install hint and the rest of the server stays unaffected. SSRF guard
+  rejects `file://`, `ftp://`, RFC 1918, loopback, and link-local targets
+  unless `CHARTER_INSPECTOR_ALLOW_PRIVATE_NETS=1` (local-dev override).
+
 ## [0.8.0] — 2026-05-19 — Trust model upgrade
 
 Charter graduates from the v0 self-attesting trust model (TOFU on first

@@ -36,6 +36,10 @@ dev = [
     "pytest-benchmark>=4.0",
     "ruff>=0.6",
     "mypy>=1.10",
+    # Inspector (B3.8) is exercised by tests/test_inspector.py — pulling
+    # jinja2 into the dev extra lets `pip install -e .[dev]` set up a
+    # full test environment without needing `.[dev,inspector]`.
+    "jinja2>=3.1",
 ]
 # `pip install charter[openai_agents]` to use the
 # `charter.adapters.openai_agents` integration.
@@ -52,6 +56,12 @@ observability = [
     "opentelemetry-api>=1.20",
     "opentelemetry-sdk>=1.20",
 ]
+# `pip install charter[inspector]` to enable the FastAPI /inspect Web UI
+# (B3.8). Without this extra, /inspect returns 503 with an install hint
+# but every other endpoint keeps working.
+inspector = [
+    "jinja2>=3.1",
+]
 
 [project.scripts]
 charter = "charter.cli:main"
@@ -64,6 +74,14 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["charter"]
+
+# Ensure the Inspector's jinja templates + static assets ship inside the
+# wheel. `packages = ["charter"]` already pulls everything under the
+# package, but being explicit here documents the intent and survives a
+# hatch refactor that might otherwise prune non-.py files.
+[tool.hatch.build.targets.wheel.force-include]
+"charter/templates" = "charter/templates"
+"charter/static" = "charter/static"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -71,7 +71,7 @@ flowchart TB
     subgraph PLANNED_LAYERS["Planned Layers (forward-looking)"]
         EDGE["Edge Proxy<br/>(Cloudflare + Web Bot Auth)<br/>SHIPPED A6 (adapter+middleware)"]
         RG["Resource Gateway<br/>(Postgres / Stripe / FS / tools)<br/>PLANNED A8"]
-        INSP["Inspector Web UI<br/>PLANNED B3.8"]
+        INSP["Inspector Web UI<br/>SHIPPED B3.8"]
         AP2["AP2 Mandate Verifier<br/>PLANNED A5"]
     end
 
@@ -108,8 +108,8 @@ flowchart TB
     classDef deferred fill:#f3f4f6,stroke:#6b7280,color:#000,stroke-dasharray: 2 2
     classDef external fill:#e0e7ff,stroke:#4338ca,color:#000
 
-    class P,ISS,PROF,SRV,TLOG,JWKS,PINS,DISC,CA,WA,AO,EDGE shipped
-    class RG,INSP,AP2 planned
+    class P,ISS,PROF,SRV,TLOG,JWKS,PINS,DISC,CA,WA,AO,EDGE,INSP shipped
+    class RG,AP2 planned
     class MEMORY deferred
     class HTTPS external
 ```
@@ -327,9 +327,14 @@ flowchart TB
             E8["GET /transparency/proof/{charter_id}"]
         end
 
-        subgraph PLAN_TRUST["Trust Surface — Mixed"]
+        subgraph PLAN_TRUST["Trust Surface — SHIPPED"]
             E9["GET /transparency/revoked?since=N<br/>SHIPPED B1.3"]
-            E10["GET /inspect?url=...<br/>PLANNED B3.8"]
+        end
+
+        subgraph INSPECT["Inspector — SHIPPED B3.8"]
+            E10A["GET /inspect?url=...<br/>HTML render of a fetched Charter"]
+            E10B["GET /inspect/{principal}/{agent}<br/>convenience binding route"]
+            E10C["GET /static/inspector/*<br/>CSS + JS for the page"]
         end
 
         subgraph PRIVACY["Privacy — SHIPPED v0.9 Priv-1 / Priv-2 deferred"]
@@ -378,8 +383,8 @@ flowchart TB
     classDef planned fill:#fef3c7,stroke:#d97706,color:#000,stroke-dasharray: 5 5
     classDef deferred fill:#f3f4f6,stroke:#6b7280,color:#000,stroke-dasharray: 2 2
 
-    class E1,E2,E3,E4,E5,E6,E7,E8,E9,E12 shipped
-    class E10,E13,E14 planned
+    class E1,E2,E3,E4,E5,E6,E7,E8,E9,E12,E10A,E10B,E10C shipped
+    class E13,E14 planned
     class E11 deferred
     class T1,T2,T3,T4,T5,T6,T7,T10,F1,F3 shipped
     class T8,T9,F4,F5 planned
