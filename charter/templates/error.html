@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Charter Inspector &mdash; {{ title }}</title>
+  <link rel="stylesheet" href="/static/inspector/inspector.css" />
+</head>
+<body>
+  <main class="inspector">
+    <header class="header">
+      <h1>Charter Inspector</h1>
+      <span class="badge badge-revoked">{{ status_code }}</span>
+    </header>
+    <section class="panel banner banner-error" role="alert">
+      <h2>{{ title }}</h2>
+      <p>{{ message }}</p>
+      {% if charter_url %}
+      <p class="muted">URL: <code>{{ charter_url }}</code></p>
+      {% endif %}
+    </section>
+    <footer class="footer">
+      <a href="/">&larr; back to charter index</a>
+    </footer>
+  </main>
+</body>
+</html>

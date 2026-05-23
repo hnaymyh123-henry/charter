@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Charter Inspector · {{ charter.charter_id }}</title>
+  <link rel="stylesheet" href="/static/inspector/inspector.css" />
+  <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
+  <script src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+</head>
+<body>
+  <main class="inspector">
+
+    <header class="header">
+      <h1>Charter Inspector</h1>
+      <div class="header-meta">
+        <span class="charter-id" title="charter_id">{{ charter.charter_id }}</span>
+        <span class="{{ charter.lifecycle.status | status_badge }}">
+          {{ charter.lifecycle.status }}
+        </span>
+      </div>
+      <dl class="binding">
+        <dt>Principal</dt><dd>{{ charter.principal.id }} <small>({{ charter.principal.type }})</small></dd>
+        <dt>Agent</dt><dd>{{ charter.binding.agent_id }}</dd>
+        <dt>Issuer</dt><dd>{{ charter.issuer.id }} <small>({{ charter.issuer.relationship_to_principal }})</small></dd>
+        <dt>Charter URL</dt><dd><code>{{ charter_url }}</code></dd>
+        <dt>Valid</dt><dd>{{ charter.lifecycle.issued_at }} &rarr; {{ charter.lifecycle.valid_until }}</dd>
+      </dl>
+    </header>
+
+    {% if fetch_error_class %}
+    <section class="banner banner-error" role="alert">
+      <strong>Verification failed:</strong>
+      {{ fetch_error_class }} &mdash; {{ fetch_error_message }}
+      <p class="muted">Clauses below are rendered for inspection only; do not rely on this Charter.</p>
+    </section>
+    {% endif %}
+
+    <section class="panel">
+      <h2>Plain-language summary</h2>
+      <p class="summary">{{ charter.summary.plain_language }}</p>
+    </section>
+
+    <section class="panel" x-data="{ openId: null }">
+      <h2>Clauses ({{ charter.clauses | length }})</h2>
+      <ul class="clauses">
+        {% for clause, redacted_count in clause_rows %}
+        <li class="clause clause-{{ clause.type }}">
+          <button class="clause-toggle"
+                  type="button"
+                  @click="openId = (openId === '{{ clause.id }}' ? null : '{{ clause.id }}')">
+            <span class="clause-icon" aria-hidden="true">
+              {% if clause.type == "scope" %}+{% endif %}
+              {% if clause.type == "out_of_scope" %}-{% endif %}
+              {% if clause.type == "approval_required" %}?{% endif %}
+              {% if clause.type == "operational_limit" %}#{% endif %}
+              {% if clause.type == "style" %}~{% endif %}
+              {% if clause.type == "data_handling" %}@{% endif %}
+            </span>
+            <span class="clause-id">{{ clause.id }}</span>
+            <span class="clause-type">{{ clause.type }}</span>
+            {% if redacted_count > 0 %}
+            <span class="redacted-badge" title="{{ redacted_count }} private field(s)">
+              [REDACTED:{{ redacted_count }}]
+            </span>
+            {% endif %}
+          </button>
+          <div class="clause-body" x-show="openId === '{{ clause.id }}'" x-cloak>
+            <p class="clause-text">{{ clause.text }}</p>
+            {% if clause.private_fields %}
+            <ul class="private-fields">
+              {% for pf in clause.private_fields %}
+              <li>
+                <code>span [{{ pf.span_start }}, {{ pf.span_end }}]</code>
+                disclosure_hash =
+                <code class="hash">{{ pf.disclosure_hash[:14] }}&hellip;</code>
+              </li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="panel">
+      <h2>Signature &amp; trust</h2>
+      <table class="verify">
+        <thead><tr><th>Check</th><th>Result</th><th>Detail</th></tr></thead>
+        <tbody>
+          {% for step in verify_steps %}
+          <tr class="{{ 'verify-ok' if step.ok else 'verify-fail' }}">
+            <td>{{ step.label }}</td>
+            <td>{% if step.ok %}&#x2714;{% else %}&#x2717;{% endif %}</td>
+            <td>{{ step.detail }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <dl class="signature-meta">
+        <dt>Issuer kid</dt><dd><code>{{ charter.provenance.issuer_kid or "(none)" }}</code></dd>
+        <dt>Issuer public key</dt><dd><code class="break">{{ charter.provenance.issuer_public_key }}</code></dd>
+        <dt>Signature</dt><dd><code class="break">{{ charter.provenance.issuer_signature }}</code></dd>
+        <dt>Transparency seq</dt><dd>{{ charter.provenance.transparency_log_id if charter.provenance.transparency_log_id is not none else "(none)" }}</dd>
+      </dl>
+    </section>
+
+    {% if chain | length > 1 %}
+    <section class="panel">
+      <h2>Charter chain ({{ chain | length }} hops)</h2>
+      <ol class="chain">
+        {% for node in chain %}
+        <li class="chain-node" style="margin-left: {{ node.depth }}rem">
+          {% if node.charter %}
+          <a href="/inspect?url={{ node.url | urlencode }}">
+            {{ node.charter.charter_id }}
+          </a>
+          <small>({{ node.charter.lifecycle.status }})</small>
+          {% else %}
+          <span class="chain-broken">broken: {{ node.url }} &mdash; {{ node.error }}</span>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+    </section>
+    {% endif %}
+
+    {% if diff_text %}
+    <section class="panel">
+      <h2>Diff vs prior version ({{ charter.lifecycle.replaces }})</h2>
+      <pre class="diff">{{ diff_text }}</pre>
+    </section>
+    {% endif %}
+
+    <footer class="footer">
+      Inspector renders verified Charter data only. JWKS / pin / lifecycle
+      checks were applied before this page was generated.
+    </footer>
+  </main>
+</body>
+</html>
