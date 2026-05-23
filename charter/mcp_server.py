@@ -779,73 +779,109 @@ def fetch_charter_chain(charter_url: str, max_depth: int = 5) -> dict[str, Any]:
     """
     from .chain import verify_chain
 
-    if max_depth < 1:
-        return {"ok": False, "reason": "max_depth must be >= 1", "partial": []}
+    with charter_span_cm(
+        "charter.fetch_chain",
+        {"charter.url": charter_url, "charter.max_depth": max_depth},
+    ) as chain_span:
+        if max_depth < 1:
+            set_span_attrs(chain_span, {"charter.verdict": "bad_max_depth"})
+            return {"ok": False, "reason": "max_depth must be >= 1", "partial": []}
 
-    # leaf-first walk; we reverse at the end so the caller sees root-first.
-    walked: list[Charter] = []
-    seen_ids: set[str] = set()
+        # leaf-first walk; we reverse at the end so the caller sees root-first.
+        walked: list[Charter] = []
+        seen_ids: set[str] = set()
 
-    current_url = charter_url
-    while True:
-        if len(walked) >= max_depth:
-            return _chain_failure(
-                f"max_depth={max_depth} exceeded while walking from {charter_url}",
-                walked,
-            )
+        current_url = charter_url
+        while True:
+            if len(walked) >= max_depth:
+                set_span_attrs(
+                    chain_span,
+                    {"charter.verdict": "max_depth_exceeded", "charter.chain_depth": len(walked)},
+                )
+                return _chain_failure(
+                    f"max_depth={max_depth} exceeded while walking from {charter_url}",
+                    walked,
+                )
 
-        try:
-            charter = _fetch_and_verify(current_url)
-        except Exception as e:
-            # Typed errors from _fetch_and_verify propagate as a clean
-            # failure rather than tearing the tool down. The error class
-            # name is informative enough for the caller.
-            return _chain_failure(
-                f"{type(e).__name__}: {e}",
-                walked,
-            )
+            try:
+                charter = _fetch_and_verify(current_url)
+            except Exception as e:
+                # Typed errors from _fetch_and_verify propagate as a clean
+                # failure rather than tearing the tool down. The error class
+                # name is informative enough for the caller.
+                set_span_attrs(
+                    chain_span,
+                    {
+                        "charter.verdict": type(e).__name__,
+                        "charter.chain_depth": len(walked),
+                    },
+                )
+                return _chain_failure(
+                    f"{type(e).__name__}: {e}",
+                    walked,
+                )
 
-        # Cycle detection: refuse to revisit a charter_id.
-        if charter.charter_id in seen_ids:
-            return _chain_failure(
-                f"cycle detected at {charter.charter_id}",
-                walked,
-            )
-        seen_ids.add(charter.charter_id)
+            # Cycle detection: refuse to revisit a charter_id.
+            if charter.charter_id in seen_ids:
+                set_span_attrs(
+                    chain_span,
+                    {"charter.verdict": "cycle", "charter.chain_depth": len(walked)},
+                )
+                return _chain_failure(
+                    f"cycle detected at {charter.charter_id}",
+                    walked,
+                )
+            seen_ids.add(charter.charter_id)
 
-        walked.append(charter)
+            walked.append(charter)
 
-        if charter.parent_charter_url is None:
-            break  # reached the root
-        current_url = charter.parent_charter_url
+            if charter.parent_charter_url is None:
+                break  # reached the root
+            current_url = charter.parent_charter_url
 
-    # walked is leaf-to-root; verify_chain wants child-then-parent, then we
-    # produce a root-first output for the caller.
-    for i in range(len(walked) - 1):
-        child = walked[i]
-        parent = walked[i + 1]
-        if not verify_chain(child, parent):
-            return _chain_failure(
-                f"attenuation broken: {child.charter_id} is not a valid"
-                f" subset of {parent.charter_id}",
-                walked,
-            )
+        # walked is leaf-to-root; verify_chain wants child-then-parent, then we
+        # produce a root-first output for the caller.
+        for i in range(len(walked) - 1):
+            child = walked[i]
+            parent = walked[i + 1]
+            if not verify_chain(child, parent):
+                set_span_attrs(
+                    chain_span,
+                    {
+                        "charter.verdict": "attenuation_broken",
+                        "charter.chain_depth": len(walked),
+                    },
+                )
+                return _chain_failure(
+                    f"attenuation broken: {child.charter_id} is not a valid"
+                    f" subset of {parent.charter_id}",
+                    walked,
+                )
 
-    chain_root_first = list(reversed(walked))
-    _log_chain_fetch.info(
-        "chain fetched",
-        extra={
-            "root_charter_id": chain_root_first[0].charter_id,
-            "leaf_charter_id": chain_root_first[-1].charter_id,
+        chain_root_first = list(reversed(walked))
+        set_span_attrs(
+            chain_span,
+            {
+                "charter.verdict": "ok",
+                "charter.chain_depth": len(chain_root_first),
+                "charter.chain_root_id": chain_root_first[0].charter_id,
+                "charter.chain_leaf_id": chain_root_first[-1].charter_id,
+            },
+        )
+        _log_chain_fetch.info(
+            "chain fetched",
+            extra={
+                "root_charter_id": chain_root_first[0].charter_id,
+                "leaf_charter_id": chain_root_first[-1].charter_id,
+                "depth": len(chain_root_first),
+                "outcome": "ok",
+            },
+        )
+        return {
+            "ok": True,
+            "chain": [c.model_dump(mode="json") for c in chain_root_first],
             "depth": len(chain_root_first),
-            "outcome": "ok",
-        },
-    )
-    return {
-        "ok": True,
-        "chain": [c.model_dump(mode="json") for c in chain_root_first],
-        "depth": len(chain_root_first),
-    }
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -886,6 +922,34 @@ def aggregate_verdict_chain(
 
     Determinism: no LLM call. Same chain + same hits => same Verdict.
     """
+    with charter_span_cm(
+        "charter.aggregate_chain",
+        {"charter.chain_depth": len(chain)},
+    ) as span:
+        result = _aggregate_verdict_chain_impl(chain, hits_per_charter)
+        # Surface useful summary stats on the span. matched_clauses lives in
+        # the Verdict for the success path; for early-exit paths (empty chain,
+        # no-match) it may be absent.
+        matched_clauses = result.get("matched_clauses") or []
+        applied_count = sum(1 for m in matched_clauses if m.get("applied"))
+        set_span_attrs(
+            span,
+            {
+                "charter.verdict": str(result.get("decision") or result.get("reason") or ""),
+                "charter.matched_clause_count": len(matched_clauses),
+                "charter.applied_clause_count": applied_count,
+            },
+        )
+        return result
+
+
+def _aggregate_verdict_chain_impl(
+    chain: list[dict[str, Any]],
+    hits_per_charter: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Inner implementation of aggregate_verdict_chain. Pulled out so the
+    span wrapper can capture summary stats on the result without indenting
+    the whole body. Aggregation semantics are **unchanged**."""
     if not chain:
         return {
             "ok": False,
