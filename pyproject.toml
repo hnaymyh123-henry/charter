@@ -41,6 +41,16 @@ dev = [
 openai_agents = [
     "openai-agents>=0.2",
 ]
+# `pip install charter[observability]` to wire Charter into your
+# OpenTelemetry pipeline (Datadog, Honeycomb, Tempo, Jaeger, Grafana
+# Cloud, ...). Without this extra installed, every span helper in
+# `charter.observability` degrades to a no-op — production import paths
+# never break and no runtime cost is paid. See `docs/observability.md`
+# for span schema + deployment examples.
+observability = [
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+]
 
 [project.scripts]
 charter = "charter.cli:main"
