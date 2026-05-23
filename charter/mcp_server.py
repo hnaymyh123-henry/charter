@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -86,6 +87,7 @@ from .errors import (
     CharterSignatureError,
 )
 from .keys import fetch_jwks, issuer_origin_from_url, jwk_to_public_key_string
+from .observability import charter_span_cm, set_span_attrs
 from .pins import fingerprint_of, get_pin, record_pin, update_last_verified
 from .schema import Charter, MatchedClause, Verdict
 from .signing import verify_charter
@@ -155,7 +157,49 @@ def _fetch_and_verify(charter_url: str) -> Charter:
         3. Legacy Charters (no `kid`) skip step 2 and keep working under the
            v0 self-attesting trust model.
 
-    Emits exactly one log line per call describing the outcome.
+    Emits exactly one log line per call describing the outcome, and one
+    OTel span (`charter.fetch_and_verify`) carrying `charter.id` /
+    `charter.principal_id` / `charter.agent_id` / `charter.verdict` /
+    `charter.cache_hit` / `charter.latency_ms` when OTel is installed.
+    """
+    start = time.monotonic()
+    with charter_span_cm(
+        "charter.fetch_and_verify",
+        {"charter.url": charter_url, "charter.cache_hit": False},
+    ) as span:
+        try:
+            charter = _fetch_and_verify_impl(charter_url)
+        except Exception as e:
+            # _fetch_and_verify_impl emits structured logs already; here we
+            # only enrich the span before re-raising. charter_span_cm itself
+            # records the exception and flips status to ERROR.
+            set_span_attrs(
+                span,
+                {
+                    "charter.verdict": type(e).__name__,
+                    "charter.latency_ms": int((time.monotonic() - start) * 1000),
+                },
+            )
+            raise
+
+        set_span_attrs(
+            span,
+            {
+                "charter.id": charter.charter_id,
+                "charter.principal_id": charter.binding.principal_id,
+                "charter.agent_id": charter.binding.agent_id,
+                "charter.verdict": "ok",
+                "charter.latency_ms": int((time.monotonic() - start) * 1000),
+            },
+        )
+        return charter
+
+
+def _fetch_and_verify_impl(charter_url: str) -> Charter:
+    """Inner implementation. Kept separate from `_fetch_and_verify` so the
+    span wrapper can capture timing + verdict cleanly without indenting the
+    whole body three more levels. The order of operations is **unchanged**
+    from the pre-B2.7 implementation — see protocol invariant #6.
     """
     try:
         resp = httpx.get(charter_url, timeout=10.0)
