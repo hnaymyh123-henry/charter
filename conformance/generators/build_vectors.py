@@ -40,7 +40,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from charter import __version__ as CHARTER_VERSION  # noqa: E402
-from charter import privacy, signing, transparency  # noqa: E402
+from charter import privacy, transparency  # noqa: E402
 from charter.chain import _verify_chain_strict  # noqa: E402
 from charter.constants import TYPE_TO_DECISION, aggregate_decision  # noqa: E402
 from charter.pins import fingerprint_of  # noqa: E402
@@ -62,7 +62,6 @@ from charter.signing import (  # noqa: E402
     kid_for_public_key,
     public_key_to_jwk,
     public_key_to_string,
-    sign_charter,
     verify_charter,
 )
 
@@ -994,9 +993,7 @@ def gen_privacy_vectors() -> None:
     fixed_salt = bytes.fromhex("0123456789abcdef0123456789abcdef")
     clause_text = "Handle customer Alice Wonderland with care."
     span = (16, 31)  # "Alice Wonderland"
-    redacted_text, fields, disclosures = privacy.redact_clause(
-        clause_text, [span], salt=fixed_salt
-    )
+    redacted_text, fields, disclosures = privacy.redact_clause(clause_text, [span], salt=fixed_salt)
 
     # 1. Redaction roundtrip — deterministic under fixed salt.
     _write_vector(
@@ -1134,7 +1131,16 @@ def main() -> int:
     os.environ["CHARTER_TRANSPARENCY_LOG"] = str(VECTORS_DIR / "_scratch.log")
 
     # Clear vector subdirs (NOT the runners or top-level metadata yet).
-    for sub in ["sign", "verify", "aggregate", "chain", "lifecycle", "jwks", "transparency", "privacy"]:
+    for sub in [
+        "sign",
+        "verify",
+        "aggregate",
+        "chain",
+        "lifecycle",
+        "jwks",
+        "transparency",
+        "privacy",
+    ]:
         target = VECTORS_DIR / sub
         if target.exists():
             shutil.rmtree(target)

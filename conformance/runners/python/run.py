@@ -36,6 +36,8 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
+
 from charter import privacy  # noqa: E402
 from charter.chain import _verify_chain_strict  # noqa: E402
 from charter.constants import TYPE_TO_DECISION, aggregate_decision  # noqa: E402
@@ -47,8 +49,6 @@ from charter.signing import (  # noqa: E402
     public_key_to_jwk,
     verify_charter,
 )
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Result types
@@ -112,9 +112,7 @@ def _op_sign(input_: dict[str, Any]) -> dict[str, Any]:
     private = Ed25519PrivateKey.from_private_bytes(seed)
     # Inline-sign so we don't trigger the transparency log.
     if charter.provenance.issuer_kid is None:
-        charter.provenance.issuer_kid = kid_for_public_key(
-            charter.provenance.issuer_public_key
-        )
+        charter.provenance.issuer_kid = kid_for_public_key(charter.provenance.issuer_public_key)
     payload = _canonical_bytes(charter)
     sig = private.sign(payload)
     charter.provenance.issuer_signature = f"ed25519:{base64.b64encode(sig).decode('ascii')}"
@@ -228,7 +226,9 @@ def _op_redact_clause(input_: dict[str, Any]) -> dict[str, Any]:
     salt = bytes.fromhex(input_["salt_hex"])
     spans = [tuple(s) for s in input_["private_spans"]]
     redacted, fields, disclosures = privacy.redact_clause(
-        input_["clause_text"], spans, salt=salt  # type: ignore[arg-type]
+        input_["clause_text"],
+        spans,
+        salt=salt,  # type: ignore[arg-type]
     )
     return {
         "redacted_text": redacted,
@@ -325,9 +325,7 @@ def _validate_vector_schema(path: Path, vector: dict[str, Any]) -> None:
             "exactly one must be set"
         )
     if not isinstance(vector["input"], dict) or "operation" not in vector["input"]:
-        raise RuntimeError(
-            f"vector {path} has no input.operation; cannot dispatch"
-        )
+        raise RuntimeError(f"vector {path} has no input.operation; cannot dispatch")
 
 
 def _run_one(path: Path) -> VectorResult:
@@ -391,10 +389,7 @@ def _run_one(path: Path) -> VectorResult:
             spec_section=spec_section,
             passed=False,
             duration_s=perf_counter() - start,
-            reason=(
-                f"expected_error={vector['expected_error']!r} but handler returned "
-                f"{actual!r}"
-            ),
+            reason=(f"expected_error={vector['expected_error']!r} but handler returned {actual!r}"),
         )
 
     if actual != vector["expected_output"]:
@@ -424,11 +419,7 @@ def _discover(vectors_dir: Path, pattern: str | None) -> list[Path]:
     """Find every vector JSON, optionally filtering by substring in relative path."""
     if not vectors_dir.exists():
         return []
-    paths = sorted(
-        p
-        for p in vectors_dir.rglob("*.json")
-        if p.name != "generation_metadata.json"
-    )
+    paths = sorted(p for p in vectors_dir.rglob("*.json") if p.name != "generation_metadata.json")
     if pattern:
         paths = [p for p in paths if pattern in str(p.relative_to(vectors_dir))]
     return paths
@@ -516,17 +507,16 @@ def main(argv: list[str] | None = None) -> int:
         summary.results.append(result)
         if args.verbose or not result.passed:
             tag = "PASS" if result.passed else "FAIL"
-            print(f"[{tag}] {path.relative_to(args.vectors_dir)}  ({result.duration_s * 1000:.1f}ms)")
+            print(
+                f"[{tag}] {path.relative_to(args.vectors_dir)}  ({result.duration_s * 1000:.1f}ms)"
+            )
             if not result.passed and result.reason:
                 # Indent the failure reason so it's clearly part of the failing vector.
                 for line in result.reason.splitlines():
                     print(f"       {line}")
 
     print()
-    print(
-        f"Conformance: {summary.passed}/{summary.total} vectors passed "
-        f"({summary.failed} failed)"
-    )
+    print(f"Conformance: {summary.passed}/{summary.total} vectors passed ({summary.failed} failed)")
 
     if args.junit_xml is not None:
         _emit_junit_xml(summary, args.junit_xml)
