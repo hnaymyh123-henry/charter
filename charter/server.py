@@ -24,19 +24,100 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator
+import re
+from collections.abc import Awaitable, Callable, Iterator
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from . import transparency
+from . import revocation, transparency
 from .constants import DEFAULT_URL_BASE
 from .signing import public_key_to_jwk
 from .storage import list_charters, list_known_issuer_keys, load_charter, load_disclosure
 
 app = FastAPI(title="Charter Service", version="0.1.0")
+
+
+# Charter response routes that should carry a Cache-Control header so
+# callers know how long their cached Charter is permitted to live. The
+# middleware below applies the header to responses on these paths.
+# Health, JWKS, transparency endpoints are intentionally excluded — they
+# have their own freshness contracts.
+_CHARTER_RESPONSE_PATHS = {
+    "/api/lookup",
+}
+# Path patterns for the two parameterized Charter routes. Compiled once
+# at import time. Matching is intentionally exact (no trailing-slash
+# tolerance) to mirror FastAPI's router behavior.
+_WELL_KNOWN_CHARTER_RE = re.compile(r"^/\.well-known/charter/[^/]+$")
+# `/{principal_id}/{agent_id}` — exactly two non-empty path segments,
+# neither beginning with a reserved prefix. The reserved-prefix check is
+# defensive: FastAPI already routes `/transparency/...`, `/disclosures/...`,
+# `/.well-known/...`, `/api/...`, `/healthz` to their specific handlers
+# before the catch-all, but the middleware runs ahead of the router and
+# cannot rely on that ordering.
+_GET_CHARTER_RE = re.compile(
+    r"^/(?!(?:transparency|disclosures|api|healthz)(?:/|$))"
+    r"(?!\.well-known(?:/|$))"
+    r"[^/]+/[^/]+$"
+)
+
+
+def _cache_ttl_seconds() -> int:
+    """Resolve the Cache-Control max-age for Charter responses.
+
+    Default 300s (5 min). Operators can tune via ``CHARTER_CACHE_TTL``;
+    values <= 0 disable the header entirely (return 0 here -> middleware
+    skips). Non-numeric / negative env values silently fall back to the
+    default rather than crashing the request — log-and-continue is the
+    operator-friendly choice for a non-critical header.
+    """
+    raw = os.environ.get("CHARTER_CACHE_TTL", "").strip()
+    if not raw:
+        return 300
+    try:
+        ttl = int(raw)
+    except ValueError:
+        return 300
+    return max(0, ttl)
+
+
+def _is_charter_response_path(path: str) -> bool:
+    """True iff `path` is one of the three Charter-returning routes.
+
+    Used by the Cache-Control middleware below. Kept as a pure function
+    so it's trivially unit-testable without spinning up the app.
+    """
+    if path in _CHARTER_RESPONSE_PATHS:
+        return True
+    if _WELL_KNOWN_CHARTER_RE.match(path):
+        return True
+    return bool(_GET_CHARTER_RE.match(path))
+
+
+@app.middleware("http")
+async def _cache_control_middleware(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """Stamp `Cache-Control` on responses for Charter-returning routes.
+
+    Applies only to 200 responses on the three read paths so that 404s
+    and 5xx are not cached. The header is added at the middleware layer
+    so the existing route bodies stay untouched — that keeps this PR
+    bisectable from the parallel route work in #39 / #14.
+    """
+    response = await call_next(request)
+    if response.status_code != 200:
+        return response
+    if not _is_charter_response_path(request.url.path):
+        return response
+    ttl = _cache_ttl_seconds()
+    if ttl <= 0:
+        return response
+    response.headers["Cache-Control"] = f"max-age={ttl}, must-revalidate"
+    return response
 
 
 def _self_hosted_principal() -> str | None:
@@ -219,6 +300,53 @@ def transparency_log(
         for entry in transparency.read_log():
             if entry.seq <= since:
                 continue
+            yield json.dumps(entry.to_dict(), ensure_ascii=False) + "\n"
+
+    return StreamingResponse(_iter(), media_type="application/x-ndjson")
+
+
+@app.get("/transparency/revoked")
+def transparency_revoked(
+    since: str = Query(
+        default="0",
+        description=(
+            "Skip revocation entries with seq <= since. Negative or non-integer values return 400."
+        ),
+    ),
+) -> StreamingResponse:
+    """Stream the revoked-Charter feed as `application/x-ndjson`.
+
+    One JSON object per line, ordered by transparency-log `seq`:
+
+        {"charter_id": "...", "principal_id": "...",
+         "agent_id": "...", "revoked_at": "...", "seq": N}
+
+    Use ``?since=N`` (the last seq you already consumed) for incremental
+    polls. The body is derived live from the transparency log + Charter
+    files on every request; there is no separate revocation file (see
+    ADR-007: revocation info travels through the transparency log).
+
+    Fail-closed input validation: ``since`` MUST parse to a non-negative
+    integer. Anything else returns 400 — a malformed cursor would
+    otherwise silently return the whole feed, which a careless client
+    might then mis-handle as "no recent revocations".
+    """
+    # FastAPI's Query(ge=0) returns 422; the spec wants 400. Validate
+    # by hand so the error contract matches.
+    try:
+        since_int = int(since)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400, detail=f"`since` must be an integer, got {since!r}"
+        ) from e
+    if since_int < 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"`since` must be non-negative, got {since_int}",
+        )
+
+    def _iter() -> Iterator[str]:
+        for entry in revocation.iter_revoked_entries(since_int):
             yield json.dumps(entry.to_dict(), ensure_ascii=False) + "\n"
 
     return StreamingResponse(_iter(), media_type="application/x-ndjson")

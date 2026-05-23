@@ -249,9 +249,9 @@ sequenceDiagram
 
     Note over CA,RG: PLANNED paths (forward-looking)
 
-    rect rgb(254, 243, 199)
-        CA->>SRV: GET /transparency/revoked?since=N  [B1.3]
-        SRV-->>CA: incremental revocation list
+    rect rgb(220, 252, 231)
+        CA->>SRV: GET /transparency/revoked?since=N  [B1.3 SHIPPED]
+        SRV-->>CA: incremental revocation NDJSON stream
     end
 
     rect rgb(254, 243, 199)
@@ -291,6 +291,15 @@ sequenceDiagram
 - **B2.5 step-up** is the dual of `propose_within_scope`: instead of
   rewriting the task to fit the Charter, it temporarily widens the
   Charter to fit the task.
+- **B1.3 revocation propagation (SHIPPED v0.9)** closes the "stale
+  cache after revoke" gap shown in row 4 of §5. Every Charter response
+  now carries `Cache-Control: max-age=<CHARTER_CACHE_TTL or 300>,
+  must-revalidate`; the new `GET /transparency/revoked?since=N` is an
+  NDJSON stream derived live from the transparency log (no second
+  source of truth — ADR-007); and `charter.revocation.
+  subscribe_revocations` plus the `RevocationAwareCache` wrapper give
+  SDK consumers a poll-mode subscriber that auto-evicts cached
+  Charters whose `charter_id` arrives in the feed.
 
 ---
 
@@ -318,8 +327,8 @@ flowchart TB
             E8["GET /transparency/proof/{charter_id}"]
         end
 
-        subgraph PLAN_TRUST["Trust Surface — PLANNED"]
-            E9["GET /transparency/revoked?since=N<br/>PLANNED B1.3"]
+        subgraph PLAN_TRUST["Trust Surface — Mixed"]
+            E9["GET /transparency/revoked?since=N<br/>SHIPPED B1.3"]
             E10["GET /inspect?url=...<br/>PLANNED B3.8"]
         end
 
@@ -345,7 +354,7 @@ flowchart TB
         T7["10. aggregate_verdict_chain — SHIPPED"]
         T8["11. verify_chain_semantic<br/>PLANNED A1"]
         T9["12. request_step_up<br/>PLANNED B2.5"]
-        T10["13. fetch_revocations<br/>PLANNED B1.3"]
+        T10["13. subscribe_revocations (SDK helper)<br/>SHIPPED B1.3"]
     end
 
     subgraph FRAMEWORK["Framework Adapters"]
@@ -369,11 +378,11 @@ flowchart TB
     classDef planned fill:#fef3c7,stroke:#d97706,color:#000,stroke-dasharray: 5 5
     classDef deferred fill:#f3f4f6,stroke:#6b7280,color:#000,stroke-dasharray: 2 2
 
-    class E1,E2,E3,E4,E5,E6,E7,E8,E12 shipped
-    class E9,E10,E13,E14 planned
+    class E1,E2,E3,E4,E5,E6,E7,E8,E9,E12 shipped
+    class E10,E13,E14 planned
     class E11 deferred
-    class T1,T2,T3,T4,T5,T6,T7,F1,F3 shipped
-    class T8,T9,T10,F4,F5 planned
+    class T1,T2,T3,T4,T5,T6,T7,T10,F1,F3 shipped
+    class T8,T9,F4,F5 planned
     class F2 deferred
     class ES1,ES2,ES3,ES4,ES5,ES6 planned
 ```
@@ -414,7 +423,7 @@ flowchart TB
         D1["Ed25519 signature over canonical JSON<br/>SHIPPED v0 / strengthened v0.6 (encrypted keys)"]
         D2["JWKS endpoint + key-fingerprint pinning<br/>SHIPPED v0.8"]
         D3["SHA-256-chained transparency log<br/>(append-only, third-party auditable)<br/>SHIPPED v0.8"]
-        D4["Revocation propagation<br/>(Cache-Control + /transparency/revoked)<br/>PLANNED B1.3"]
+        D4["Revocation propagation<br/>(Cache-Control + /transparency/revoked)<br/>SHIPPED B1.3"]
         D5["Adversarial test suite + threat model doc<br/>PLANNED B1.4"]
         D6["Resource Gateway enforcement<br/>(Postgres reference + pattern doc)<br/>PLANNED A8"]
     end
@@ -431,15 +440,23 @@ flowchart TB
     classDef threat fill:#fee2e2,stroke:#dc2626,color:#000
 
     class T1,T2,T3,T4,T5,T6 threat
-    class D1,D2,D3 shipped
-    class D4,D5,D6 planned
+    class D1,D2,D3,D4 shipped
+    class D5,D6 planned
 ```
 
 **Reading guide.**
 
 - Rows 1-3 are **SHIPPED on `main`** and cover the cryptographic +
   audit story Charter v0.8 sells today.
-- Rows 4-6 are the **production-readiness gap** the next milestone
+- Row 4 **shipped in v0.9 (B1.3)**: every Charter response carries a
+  `Cache-Control: max-age=300, must-revalidate` header (override via
+  `CHARTER_CACHE_TTL`); the new `GET /transparency/revoked?since=N`
+  endpoint exposes an incremental NDJSON stream derived from the
+  transparency log + Charter `lifecycle.status`, and
+  `charter.revocation.subscribe_revocations` / `RevocationAwareCache`
+  give SDK consumers a poll-mode subscriber that auto-evicts cached
+  Charters when their `charter_id` arrives in the stream.
+- Rows 5-6 are the **production-readiness gap** the next milestone
   closes. Without them, Charter is "promising protocol with audit
   trail"; with them, it's "protocol you can hand to a security review
   team and not lose the meeting".

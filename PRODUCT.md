@@ -311,6 +311,37 @@ A server MAY return an expired Charter as long as `lifecycle.status` and
 `valid_until` accurately reflect that state. The caller's gate enforces
 the degradation.
 
+**Client revocation visibility (v0.9 B1.3).** A naive caller that
+caches a fetched Charter never learns that the issuer revoked it until
+the cache TTL expires — hours, days, sometimes longer. v0.9 closes
+that gap with two cooperating surfaces:
+
+- Every Charter response (`GET /{principal}/{agent}`,
+  `GET /.well-known/charter/{agent_id}`, `GET /api/lookup`) carries
+  `Cache-Control: max-age=300, must-revalidate`. The TTL is operator-
+  tunable via the `CHARTER_CACHE_TTL` env var; setting it to `0`
+  disables the header for callers that want to manage their own
+  freshness.
+- `GET /transparency/revoked?since=<seq>` streams an `application/
+  x-ndjson` feed of `{charter_id, principal_id, agent_id, revoked_at,
+  seq}` rows derived live from the transparency log (no separate
+  revocation file — see ADR-007). Clients pass the highest `seq` they
+  have already consumed and get back only newer entries; non-integer
+  or negative `since` returns 400 (fail-closed cursor).
+
+The reference SDK exposes two helpers on top of those:
+`charter.revocation.subscribe_revocations(origin, since,
+poll_interval=60)` is an async generator that yields each new
+`RevocationEntry`; `charter.revocation.RevocationAwareCache` wraps a
+`dict[charter_id, Charter]` and, when used as an async context
+manager, runs a background polling task that `pop`s any cached
+Charter whose id arrives in the feed.
+
+WebSub / WebHook push-mode delivery is deliberately deferred — pull-
+mode is enough to make the security claim "callers can find out about
+a revoke within `poll_interval + CHARTER_CACHE_TTL`" without forcing
+every issuer to host a webhook fan-out.
+
 ### 4.5 Self-Attesting Signing
 
 v0 uses a **Self-Attesting Charter**: the Charter's own
