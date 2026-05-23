@@ -150,6 +150,38 @@ class RewriteFailure(BaseModel):
     reason: str
 
 
+class AP2VerifyResult(BaseModel):
+    """Result of running an AP2 Mandate through the Charter compatibility
+    check (see `charter.adapters.ap2.verify`).
+
+    Charter and AP2 verify orthogonal axes — Charter answers "is the agent
+    allowed to do this kind of work for this principal at all?", AP2
+    answers "is this specific transaction authorized?". A safe delegation
+    requires both to pass, which is what `final_decision` collapses.
+
+    Attributes:
+        mandate_ok:
+            True iff the AP2 mandate itself passes the host's mandate
+            integrity check (signature + lifetime + scope).
+        charter_verdict:
+            Verdict from running `aggregate_verdict` against the Charter
+            referenced by `extensions.charter_url`. `None` when the
+            Charter could not be fetched / verified at all (in which case
+            `final_decision` is `incompatible`).
+        final_decision:
+            Collapsed verdict combining both layers. See the rule table
+            in `charter.adapters.ap2.verify`.
+        reason:
+            Human-readable explanation; safe to surface to operators or
+            log lines.
+    """
+
+    mandate_ok: bool
+    charter_verdict: Verdict | None
+    final_decision: Literal["allow", "needs_approval", "incompatible"]
+    reason: str
+
+
 # ---------------------------------------------------------------------------
 # Lifecycle & provenance
 # ---------------------------------------------------------------------------
