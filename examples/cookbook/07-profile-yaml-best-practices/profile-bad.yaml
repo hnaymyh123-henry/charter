@@ -1,0 +1,36 @@
+# Cookbook #07 — BAD profile example
+#
+# This profile shows the anti-patterns called out in the cookbook. It
+# still parses (the Pydantic schema accepts it) but the resulting
+# clauses are much harder for a grader to apply accurately.
+
+principal:
+  id: alice@acme.com
+  role: 会计
+
+agent:
+  id: research_agent_v1
+
+scope:
+  - 处理一切相关的工作   # vague + open-ended
+  - 帮我搞定财务方面的需求   # verb-heavy, multiple capabilities mashed together
+  - 看情况   # not even a capability
+
+out_of_scope:
+  - 不要做那些不该做的事情   # negation about negation, totally unanchored
+
+approval_required:
+  - 重要的事情要先问我   # "important" is undefined
+
+data_handling:
+  what: 各种数据   # what data, exactly?
+  rules: 注意安全   # boundaries please
+
+operational:
+  hours: 看情况   # not parseable by anyone
+  # budget fields omitted entirely
+
+style: 看着办吧
+
+lifecycle:
+  valid_days: 30

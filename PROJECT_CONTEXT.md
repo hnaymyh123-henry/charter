@@ -37,6 +37,7 @@
 | [`docs/decisions.md`](docs/decisions.md) | 架构决策记录(ADR),含信任模型、签名、聚合规则、隐私层设计 | 新决策时立即追加 |
 | [`docs/style-guide.md`](docs/style-guide.md) | 命名规范、目录结构、错误处理、注释约定 | 约定变化时 |
 | [`docs/feature-log.md`](docs/feature-log.md) | 已完成功能列表(PR 号 + 合并日期),底部含已知技术债 | 每轮 Phase 5 更新 |
+| [`docs/cookbook/`](docs/cookbook/) | 10 篇场景化 how-to(写 Charter、链路 budget、revoke 不打断、Stripe / OpenAI Agents / Anthropic 集成、Profile YAML 最佳实践、self-host、JWKS 部署、transparency log 审计),每篇配 `examples/cookbook/<NN-name>/` 下可跑 sample | 协议新增能力或场景时追加 |
 
 ---
 

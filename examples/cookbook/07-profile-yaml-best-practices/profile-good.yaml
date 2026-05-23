@@ -1,0 +1,53 @@
+# Cookbook #07 — GOOD profile example
+#
+# Same principal as profile-bad.yaml, but every field rewritten per
+# the best practices in the cookbook markdown.
+
+principal:
+  id: alice@acme.com
+  role: Senior Accountant at Acme Corp, focused on Q1 tax season
+
+agent:
+  id: research_agent_v1
+  card_url: https://agents.example.com/research_agent_v1/card.json
+
+# Scope items are noun phrases, one capability each.
+scope:
+  - 会计核算
+  - 增值税申报
+  - 个人所得税申报
+  - 月度财务报表生成
+  - 发票分类
+  - 银行流水对账
+
+# Out-of-scope items are also noun phrases, framed as positive
+# capabilities the agent does NOT have (not double-negatives).
+out_of_scope:
+  - 营销文案撰写
+  - 产品代码开发
+  - UI 设计稿
+  - 客户邮件直接回复
+
+# Approval-required items name the specific trigger condition.
+approval_required:
+  - 单笔金额超过 $10,000 的财务建议
+  - 处理含有客户姓名+税号+银行账号的组合
+  - 把客户数据导出到 Acme 系统外
+  - 对生产数据库执行 DROP / DELETE / TRUNCATE
+
+# Data handling: enumerate the data classes and the operational
+# obligations separately.
+data_handling:
+  what: 客户的报税资料、税号、银行流水、收入凭证、发票扫描件
+  rules: 不外传给第三方;不写入持久化缓存;任务结束后立即从工作区丢弃
+
+# Hours: explicit timezone. Budget: numeric with currency.
+operational:
+  hours: Mon-Fri 09:00-18:00 America/New_York
+  budget_per_task_usd: 0.50
+  budget_monthly_usd: 50.00
+
+style: 结构化输出优先(JSON 或 Markdown 表格);引用来源;中文或英文均可
+
+lifecycle:
+  valid_days: 30
