@@ -655,3 +655,55 @@ def test_disclosure_path_resolved_under_disclosures_root(tmp_path: Path) -> None
         assert p2.resolve().is_relative_to(disclosures_root().resolve())
     finally:
         os.environ.pop("CHARTER_DATA_DIR", None)
+
+
+def test_disclosure_path_blocks_cross_charter_even_if_safe_regresses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression for QA Round 2 M-1.
+
+    The previous boundary check used ``disclosures_root()``, which only
+    prevented escapes from ``data/disclosures/`` — a cross-charter
+    traversal like ``charter_b/../charter_a/leak`` still resolves under
+    that root, so the only line of defense was ``_safe()``. This test
+    monkey-patches ``_safe`` to identity (the worst-case regression where
+    ``_safe`` silently passes ``..`` through) and asserts that
+    ``disclosure_path`` STILL raises ``ValueError`` because the resolved
+    path escapes the per-charter subdirectory.
+
+    If this test ever starts passing without raising, the boundary check
+    has weakened back to the pre-fix behaviour and cross-charter access
+    is no longer caught by the belt-and-suspenders layer.
+    """
+    import os
+
+    os.environ["CHARTER_DATA_DIR"] = str(tmp_path)
+    try:
+        from charter import storage as storage_module
+        from charter.storage import disclosure_path, disclosures_dir
+
+        # Pre-create both charter dirs and seed a fake leak file in
+        # charter_a so the traversal target genuinely exists on disk.
+        # This way the test fails loudly if the boundary check accepts
+        # the path: it would return a real, readable file.
+        disclosures_dir("charter_a").joinpath("leak.json").write_text(
+            '{"secret": "LEAKED"}', encoding="utf-8"
+        )
+        disclosures_dir("charter_b")  # ensure exists
+
+        # Sanity check: without bypassing _safe, the cross-charter
+        # disclosure_id is collapsed to a flat in-bounds segment — no
+        # raise, just a path inside charter_b.
+        ok_path = disclosure_path("charter_b", "../charter_a/leak")
+        assert ok_path.resolve().is_relative_to(disclosures_dir("charter_b").resolve())
+
+        # Now simulate _safe regressing to a no-op identity function.
+        # `..` and `/` pass straight through, so the joined candidate
+        # would resolve into charter_a/leak.json under the old (loose)
+        # boundary check.
+        monkeypatch.setattr(storage_module, "_safe", lambda s: s)
+
+        with pytest.raises(ValueError, match="escapes charter directory"):
+            disclosure_path("charter_b", "../charter_a/leak")
+    finally:
+        os.environ.pop("CHARTER_DATA_DIR", None)
