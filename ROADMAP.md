@@ -182,27 +182,83 @@ Auth, semantic subset-checking for chains, full framework matrix
 
 ---
 
-## Beyond v0.7 (deferred backlog)
+## v0.8 — Trust Model Upgrade (SHIPPED 2026-05-19)
 
-Tracked here so they don't get forgotten, but not on the near roadmap:
+Replaces v0's TOFU-on-first-fetch trust model with a layered model.
 
-- **Trust model upgrade.** JWKS endpoint, key-fingerprint pinning,
-  transparency log (Certificate-Transparency-style), `service_attestation`
-  second layer.
-- **Privacy.** Selective Disclosure JWT (SD-JWT) for private clauses;
-  zero-knowledge proofs for "Charter satisfies condition X" without
-  revealing X.
-- **Integrations.** Mem0/Letta auto-resync; AP2 payment terms reference;
-  Web Bot Auth signed-header carrying `charter_url`; LangGraph + CrewAI
-  adapters.
-- **Enterprise.** Connect to HRIS, generate per-role Charters
-  automatically; audit interface for "did this agent violate its
-  Charter in the last 30 days?"
-- **Capability-Boundary Enforcement.** Bind Charter check to real
-  resource gateways (DB, payments, filesystem, tool runtimes) so a
-  malicious calling agent cannot bypass the gate.
+1. **JWKS endpoint** (`/.well-known/jwks.json`) + `provenance.issuer_kid`.
+2. **Key-fingerprint pinning** at `data/pins.json` + `charter pins` CLI.
+3. **SHA-256-chained transparency log** + `GET /transparency/{head,log,proof}`
+   + `provenance.transparency_log_id` + `charter audit verify/show` CLI.
+4. CHANGELOG.md, `pyproject.toml` 0.1.0 → 0.8.0, `[tool.bumpversion]`.
+
+Released as PRs #19-#25. See `CHANGELOG.md` for the per-PR detail.
+
+---
+
+## v0.9 — Production-readiness + Ecosystem (Batch 1 SHIPPED 2026-05-23)
+
+Batch 1 closes the "fully production-grade protocol" gap. 6 PRs landed
+together:
+
+- **A1 Chain semantic subset** (LLM-based `verify_chain_semantic` with
+  mode-aware `verify_chain(mode="strict"|"semantic"|"auto")` + cache by
+  `(parent_charter_id, parent.issued_at)` + MCP tool #11 + `CharterChainGraderError`).
+  PR #34 / Issue #26.
+- **A5 AP2 Mandate integration** (`charter.adapters.ap2` + `AP2VerifyResult`
+  schema + end-to-end demo). PR #32 / Issue #27.
+- **A6 Web Bot Auth signed-header adapter** (self-implemented RFC 9421
+  Ed25519 subset + `sign_request` / `verify_request` / `gated_middleware`
+  + Cloudflare-style edge enforcement). PR #33 / Issue #28.
+- **Priv-1 Redaction + SD-JWT selective disclosure** (`Clause.private_fields`,
+  `charter/privacy.py`, `data/disclosures/<charter>/<id>.json`,
+  bearer-token `GET /disclosures/{charter_id}/{disclosure_id}`). PR #35 / Issue #31.
+- **B1.4 Adversarial test suite** (5 attack categories, 28 cases, 2 xfail
+  linked to follow-up; `FakeAnthropicClient` fixture; `docs/threat-model.md`;
+  CI step with `continue-on-error`). PR #36 / Issue #29.
+- **B3.9 Cookbook** (10 scenario guides under `docs/cookbook/` + 13 runnable
+  examples under `examples/cookbook/`). PR #37 / Issue #30.
+
+Cumulative: +11.6k lines, +104 new tests (259 → 363+), tagged ADR-003
+disclosure exception + ADR-010 string fallback + ADR-011 path-1 SHIPPED.
+
+### Batch 2 — server.py serial + parallel (NEXT)
+
+Three PRs touch `charter/server.py` and need serial merge order:
+**B1.3 Revocation propagation** → **B3.8 Inspector Web UI** → **B2.7 OTel
+semconv**. Parallel to those: **A8 Postgres reference adapter** (capability-
+boundary proof, `~500-800 LOC` standalone), **B1.1 Conformance test suite**
+(language-neutral fixtures, new repo `charter-conformance`), and **B3.10
+Performance baseline** (`benchmarks/` with `pytest-benchmark`).
+
+### Batch 3 — unblocked after Batch 1 / 2
+
+- **B1.2 JavaScript / TypeScript SDK** (`charter-js`, blocked by B1.1
+  conformance suite landing first).
+- **B2.5 Negotiation / step-up protocol** (`request_step_up` MCP tool +
+  `AdHocGrant` schema; A5 already SHIPPED so this is now unblocked).
+
+---
+
+## Beyond v0.9 (deferred backlog)
+
+- **Privacy paths 2/3.** Path 2 (delegated grading endpoint where the
+  issuer runs grading and returns only the verdict) requires an optional
+  "issuer-as-trusted-grading-oracle" protocol mode. Path 3 (ZK proofs of
+  "Charter satisfies condition X") waits for the ZK + LLM tooling stack
+  to mature.
+- **Mem0 / Letta auto-resync.** Deferred — opens a memory-poisoning →
+  privilege-escalation surface and breaks caller cache freshness.
+- **HRIS integrations.** Anti-goal per PRODUCT.md §6; Charter stays a
+  neutral protocol, integrators write their own connectors.
+- **Full Capability-Boundary Enforcement.** A8 ships a Postgres reference
+  adapter as a pattern proof; binding to Stripe / S3 / arbitrary tool
+  runtimes is multi-quarter work and remains v1+.
 - **Charter marketplace / templates.** Browseable per-role profile
-  templates ("standard accountant agent Charter").
+  templates ("standard accountant agent Charter") — gate on real adoption.
+- **More framework adapters** beyond OpenAI Agents (SHIPPED v0.7) and
+  Anthropic SDK (deferred / low priority per ADR-012). LangGraph + CrewAI
+  explicitly off-roadmap.
 
 ---
 
@@ -211,6 +267,6 @@ Tracked here so they don't get forgotten, but not on the near roadmap:
 Each iteration becomes its own milestone. Each work item becomes its own
 issue. PRs reference the issue number in the title.
 
-`v0.5` → `v0.6` → `v0.7` corresponds roughly to:
-*hygiene → completion → extension*. The first one is the boring one.
-Boring is the point.
+`v0.5` → `v0.6` → `v0.7` → `v0.8` → `v0.9` corresponds roughly to:
+*hygiene → completion → extension → trust → production-readiness*. The
+first one was the boring one — boring was the point.

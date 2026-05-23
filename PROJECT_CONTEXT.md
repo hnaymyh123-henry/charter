@@ -43,13 +43,13 @@
 
 ## 当前状态(本节频繁更新)
 
-- **最后更新**:2026-05-22
-- **当前迭代目标**:**v0.9 — Production-readiness + 生态扩散**。围绕 14 个 task 分 3 批推进:
-  - **Batch 1(并行 6 个)**: #9 Cookbook、#7 Adversarial test、#2 Chain 语义子集、#3 AP2、#4 Web Bot Auth、#6 隐私层 path 1
-  - **Batch 2(部分串行 6 个)**: #8 Revocation propagation → #12 Inspector UI → #14 OTel(server.py 串行);并行 #5 Postgres adapter、#10 Conformance suite、#15 Perf baseline
-  - **Batch 3(blocked 2 个)**: #11 JS SDK(等 #10)、#13 Step-up(等 #3)
-- **开放 PR**:无(main 干净)
-- **已知技术债**:见 [`docs/feature-log.md`](docs/feature-log.md) 底部
+- **最后更新**:2026-05-23
+- **当前迭代目标**:**v0.9 — Production-readiness + 生态扩散**。Batch 1 已 ✓ 全部合并(PR #32-#37,2026-05-23)。
+  - **Batch 1(已合并 6 个)**: #36 Adversarial → #33 Web Bot Auth → #37 Cookbook → #32 AP2 → #34 Chain semantic → #35 Priv-1
+  - **Batch 2(下一步 6 个)**: #8 Revocation propagation → #12 Inspector UI → #14 OTel(server.py 串行);并行 #5 Postgres adapter、#10 Conformance suite、#15 Perf baseline
+  - **Batch 3(blocked 2 个)**: #11 JS SDK(等 #10)、#13 Step-up(等 A5 已合并,可启动)
+- **开放 PR**:无(main 干净,已 fast-forward 到 28ff93c)
+- **已知技术债**:见 [`docs/feature-log.md`](docs/feature-log.md) 底部(v0.9 Batch 1 retro 新增 4 条)
 
 ---
 

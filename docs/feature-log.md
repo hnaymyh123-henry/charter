@@ -6,6 +6,16 @@
 
 ## 已完成
 
+### v0.9.0 — Batch 1: Production-readiness + 协议扩展(2026-05-22 → 2026-05-23 合并,PR #32-#37)
+- A1 Chain 语义子集校验 (LLM-based `verify_chain_semantic`,MCP tool #11,新 `CharterChainGraderError`,PR #34 / Issue #26)
+- A5 AP2 Mandate 集成 (`charter/adapters/ap2.py` + `AP2VerifyResult` schema + 端到端 demo,PR #32 / Issue #27)
+- A6 Web Bot Auth signed-header adapter (自实现 RFC 9421 子集 + sign/verify/middleware,Ed25519-only,PR #33 / Issue #28)
+- Priv-1 Redaction + SD-JWT selective disclosure (`Clause.private_fields` + `charter/privacy.py` + bearer-token `/disclosures/...` endpoint,PR #35 / Issue #31)
+- B1.4 Adversarial test suite (5 类攻击 28 case + `FakeAnthropicClient` + `docs/threat-model.md` + CI step,PR #36 / Issue #29)
+- B3.9 Cookbook 10 篇 (180-275 行/篇 + 13 可跑 example,PR #37 / Issue #30)
+- 累计 +11615/-46 行,+104 个新测试(259 → 363+,xfail 2)
+- ADR-003 path-1 disclosure 例外 + ADR-011 path-1 落地 + 协议不变量 #5 扩展支持 `redaction_v1`
+
 ### v0.8.0 — Trust model upgrade(2026-05-19 合并,PR #19-#25)
 - JWKS endpoint `/.well-known/jwks.json`(PR #19)
 - JWKS 客户端 + `_fetch_and_verify` 交叉检查(PR #20)
@@ -50,3 +60,7 @@
 | Discovery index 在并发 `save_charter` 下没有锁保护(单进程开发足够,部署到 fly.io 多实例时可能丢更新) | v0.6 release | 2026-05-22 |
 | `_canonical_bytes` 对 `transparency_log_id` 的特殊处理目前用文字判断,改 schema 时容易忘 —— 应该改成 Pydantic 字段元数据驱动 | v0.8 release | 2026-05-22 |
 | `propose_within_scope_verified` 的 temperature 序列(0.2 / 0.5 / 0.8)和 max_attempts=3 是硬编码,缺少可配置接口 | v0.6 release | 2026-05-22 |
+| A1 语义 chain check 已 ship,但 PR #36 的 2 个 attenuation bypass xfail 还没人验证现在能否变 xpass —— 应该跑一次 A1 verifier 重新评估 xfail 状态 | v0.9 Batch 1 retro | 2026-05-23 |
+| Worker Agent worktree 在 PR 创建成功后未自动释放,导致 fix worker 不得不在已有 worktree 工作。下轮 worker prompt 加 `ExitWorktree action=remove` 自释放 | v0.9 Batch 1 retro | 2026-05-23 |
+| Fix worker 重派(token 过期场景)的 prompt 缺"先 git log/git status 校对上轮成果"强制 step —— PR #32 第一次成功 push 但 PR comment 失败,差点重做。下轮模板加 | v0.9 Batch 1 retro | 2026-05-23 |
+| 安全相关模块的 worker prompt 缺"allowlist 优先 + 必 grep 所有调用方 + 必 pathlib boundary check"checklist。PR #35 三轮 QA 的根因 | v0.9 Batch 1 retro | 2026-05-23 |
