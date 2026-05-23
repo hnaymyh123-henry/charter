@@ -1,0 +1,17 @@
+{
+  "expected_error": null,
+  "expected_output": {
+    "alg": "EdDSA",
+    "crv": "Ed25519",
+    "kid": "34750f98bd59fcfc",
+    "kty": "OKP",
+    "use": "sig",
+    "x": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+  },
+  "input": {
+    "operation": "public_key_to_jwk",
+    "public_key": "ed25519:iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w="
+  },
+  "name": "Derive RFC 7517 JWK from ed25519:<base64> public key string",
+  "spec_section": "SPEC.md#71-jwk-shape"
+}

@@ -1,0 +1,53 @@
+{
+  "expected_error": null,
+  "expected_output": {
+    "broken_at_seq": 3,
+    "ok": false
+  },
+  "input": {
+    "entries": [
+      {
+        "appended_at": "2026-05-23T12:00:00+00:00",
+        "binding": {
+          "agent_id": "research_agent",
+          "principal_id": "alice@acme.com"
+        },
+        "charter_id": "charter:alice@acme.com:agent1:t1",
+        "entry_hash": "sha256:44f0c00dee0bb61494e957e60a5e7e445bafb6a8fcaac3a9d5116c55994aebf4",
+        "issuer_kid": "34750f98bd59fcfc",
+        "issuer_signature": "ed25519:o+8JbGvMwaRJ6qN2/086QXzs/IfMHCjTu+5DcwYlEyYRM79GsL+HOPncgwImrBdlENUK4Nm3GMTsAwCel+89AA==",
+        "prev_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "seq": 1
+      },
+      {
+        "appended_at": "2026-05-23T12:00:00+00:00",
+        "binding": {
+          "agent_id": "research_agent",
+          "principal_id": "alice@acme.com"
+        },
+        "charter_id": "charter:alice@acme.com:agent2:t2",
+        "entry_hash": "sha256:952577c9dfd32b94f24cbb3653ee9cbaf0cc7ab9f248906dc8159ab167130513",
+        "issuer_kid": "34750f98bd59fcfc",
+        "issuer_signature": "ed25519:fSAxZv04BUB1E2TaaA+N/AkYQG652OX6tsJa9R1Bs8qF/Duy7SvP7mvxOsca1XWTH4gz8FjZjRZ3SCY4o7F7Ag==",
+        "prev_hash": "sha256:44f0c00dee0bb61494e957e60a5e7e445bafb6a8fcaac3a9d5116c55994aebf4",
+        "seq": 2
+      },
+      {
+        "appended_at": "2026-05-23T12:00:00+00:00",
+        "binding": {
+          "agent_id": "research_agent",
+          "principal_id": "alice@acme.com"
+        },
+        "charter_id": "charter:alice@acme.com:agent3:t3",
+        "entry_hash": "sha256:7ac6484708b1335b0ea23069a5018dc850c3a62520ea398553dba3c8b40eabc5",
+        "issuer_kid": "34750f98bd59fcfc",
+        "issuer_signature": "ed25519:Wo62PjC68+qao+ekDB3O9th+IgN/DT1IpA/hFAjm22SLrsITvm/gD0XphTuNKN2VEl9TnpcL0TTGATDOD2ePDg==",
+        "prev_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "seq": 3
+      }
+    ],
+    "operation": "verify_log_chain"
+  },
+  "name": "Reject log when seq=3's prev_hash no longer matches seq=2's entry_hash",
+  "spec_section": "SPEC.md#83-verification"
+}

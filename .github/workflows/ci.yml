@@ -51,6 +51,14 @@ jobs:
       - name: Pytest
         run: uv run pytest -q
 
+      # Conformance vectors (Issue #42). Runs the language-neutral Python
+      # reference runner over every JSON test vector under
+      # `conformance/vectors/`. Failures here MUST take CI red — any
+      # divergence is either a regression in the Python implementation or
+      # a deliberate breaking change that needs a SPEC.md version bump.
+      - name: Conformance runner (Python reference)
+        run: uv run python conformance/runners/python/run.py --vectors-dir conformance/vectors
+
       # Adversarial suite (Issue #29). Failures here surface as warnings
       # rather than blocking the main pipeline — we want regressions in
       # known-defended attack vectors to be loud without taking the build

@@ -38,6 +38,7 @@
 | [`docs/style-guide.md`](docs/style-guide.md) | 命名规范、目录结构、错误处理、注释约定 | 约定变化时 |
 | [`docs/feature-log.md`](docs/feature-log.md) | 已完成功能列表(PR 号 + 合并日期),底部含已知技术债 | 每轮 Phase 5 更新 |
 | [`docs/cookbook/`](docs/cookbook/) | 10 篇场景化 how-to(写 Charter、链路 budget、revoke 不打断、Stripe / OpenAI Agents / Anthropic 集成、Profile YAML 最佳实践、self-host、JWKS 部署、transparency log 审计),每篇配 `examples/cookbook/<NN-name>/` 下可跑 sample | 协议新增能力或场景时追加 |
+| [`conformance/`](conformance/) | 语言无关 conformance suite:`SPEC.md` 列协议不变量 + 44 个 JSON 测试 vector + Python reference runner(权威)+ JS / Rust skeleton runners + 生成器 `generators/build_vectors.py`。CI 强制跑通,失败 = 协议级 regression | 改动 schema/signing/aggregation/chain/transparency/privacy 时 regenerate vectors + 评估 SPEC.md version bump |
 
 ---
 

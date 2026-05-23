@@ -1,0 +1,18 @@
+{
+  "expected_error": null,
+  "expected_output": {
+    "valid": true
+  },
+  "input": {
+    "claimed_hash": "sha256:09a51530f5ae8ca123cec46f151f41bfa69c84a6fa98ba4fc6f5b639601f4d9f",
+    "disclosure": {
+      "disclosure_hash": "sha256:09a51530f5ae8ca123cec46f151f41bfa69c84a6fa98ba4fc6f5b639601f4d9f",
+      "disclosure_id": "09a51530",
+      "salt_hex": "0123456789abcdef0123456789abcdef",
+      "span_value": "Alice Wonderlan"
+    },
+    "operation": "verify_disclosure"
+  },
+  "name": "verify_disclosure returns True for matching salt+value+hash",
+  "spec_section": "SPEC.md#104-disclosure-verification"
+}

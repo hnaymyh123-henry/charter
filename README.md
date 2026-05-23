@@ -303,6 +303,37 @@ agent contract/
 └── data/                               runtime-generated, git-ignored
 ```
 
+## Conformance
+
+The [`conformance/`](conformance/) directory turns Charter from "a Python
+project" into "a protocol that any language can implement". It contains:
+
+- **[`conformance/SPEC.md`](conformance/SPEC.md)** — numbered, anchored
+  list of every invariant a Charter implementation must satisfy
+  (canonical bytes, Ed25519 sign / verify, TYPE_TO_DECISION, aggregate
+  precedence, lifecycle, chain verification, JWKS, transparency log,
+  pinning, SD-JWT redaction).
+- **[`conformance/vectors/`](conformance/vectors/)** — 44 language-neutral
+  JSON test fixtures, each tagged with the SPEC.md section anchor it
+  exercises.
+- **[`conformance/runners/python/run.py`](conformance/runners/python/run.py)** —
+  the authoritative reference runner. CI runs every vector through this
+  on every push.
+- **[`conformance/runners/javascript/`](conformance/runners/javascript/)** and
+  **[`conformance/runners/rust/`](conformance/runners/rust/)** — skeleton
+  runners that prove the vector format is implementable in those
+  ecosystems. Full coverage waits for the JS SDK (Issue B1.2) and a
+  future Rust SDK.
+
+Run the conformance suite locally:
+
+```bash
+python conformance/runners/python/run.py --vectors-dir conformance/vectors
+```
+
+See [`conformance/README.md`](conformance/README.md) for how to add a
+new vector or write a new runner.
+
 ## What this implementation does not do yet
 
 See [`ROADMAP.md`](ROADMAP.md) for the prioritized post-v0 work. Highlights

@@ -1,0 +1,13 @@
+{
+  "expected_error": null,
+  "expected_output": {
+    "fingerprint": "sha256:34750f98bd59fcfc946da45aaabe933be154a4b5094e1c4abf42866505f3c97e",
+    "hex_length_chars": 64
+  },
+  "input": {
+    "operation": "pin_fingerprint",
+    "public_key": "ed25519:iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w="
+  },
+  "name": "Pin fingerprint is sha256:<full-hex> of raw public key bytes",
+  "spec_section": "SPEC.md#91-fingerprint-format"
+}

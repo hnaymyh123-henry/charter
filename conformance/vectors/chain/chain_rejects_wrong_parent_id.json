@@ -1,0 +1,187 @@
+{
+  "expected_error": null,
+  "expected_output": {
+    "valid": false
+  },
+  "input": {
+    "child": {
+      "agent_operator": {
+        "agent_card_url": null,
+        "id": "acme_research_operator",
+        "type": "service"
+      },
+      "attenuation_proof": {
+        "attenuates": {},
+        "parent_charter_id": "charter:somebody-else:fake_parent",
+        "semantic_check_cache": {}
+      },
+      "binding": {
+        "agent_id": "subagent",
+        "principal_id": "assistant",
+        "type": "principal_agent"
+      },
+      "charter_id": "charter:assistant:subagent:wrong_proof",
+      "clauses": [
+        {
+          "id": "C1",
+          "private_fields": null,
+          "text": "Research.",
+          "type": "scope"
+        },
+        {
+          "id": "C2",
+          "private_fields": null,
+          "text": "Marketing copy.",
+          "type": "out_of_scope"
+        },
+        {
+          "id": "C3",
+          "private_fields": null,
+          "text": "External contact.",
+          "type": "approval_required"
+        }
+      ],
+      "decision_schema": {
+        "decision": "allow | needs_approval | incompatible",
+        "matched_clauses": "[{id, local_decision, applied, confidence in [0,1], reason}]",
+        "reason": "string -- short summary referencing applied clauses",
+        "rewrite_available": "bool -- whether propose_within_scope might help"
+      },
+      "issuer": {
+        "id": "assistant",
+        "relationship_to_principal": "self",
+        "type": "human"
+      },
+      "lifecycle": {
+        "issued_at": "2026-05-23T12:00:00Z",
+        "replaced_by": null,
+        "replaces": null,
+        "revoked_at": null,
+        "status": "active",
+        "valid_until": "2026-06-22T12:00:00Z"
+      },
+      "parent_charter_url": null,
+      "principal": {
+        "id": "assistant",
+        "role_summary": "Researcher at Acme Corp.",
+        "type": "human"
+      },
+      "principal_chain": [],
+      "provenance": {
+        "generated_at": "2026-05-23T12:00:00Z",
+        "issuer_kid": null,
+        "issuer_public_key": "ed25519:7UkoxijRwsbq6QM4kFmVYSlZJzpcY/k2NsFGFKyHN9E=",
+        "issuer_signature": "",
+        "source_commitments": [
+          {
+            "content_hash": "sha256:abababababababababababababababababababababababababababababababab",
+            "description": "alice's profile",
+            "type": "profile_yaml"
+          }
+        ],
+        "transparency_log_id": null
+      },
+      "summary": {
+        "plain_language": "A research agent operating within Alice's scope."
+      },
+      "version": "0.1",
+      "visibility": {
+        "charter": "public",
+        "private_clauses": "not_supported_in_v0",
+        "raw_principal_context": "private"
+      }
+    },
+    "operation": "verify_chain_strict",
+    "parent": {
+      "agent_operator": {
+        "agent_card_url": null,
+        "id": "acme_research_operator",
+        "type": "service"
+      },
+      "attenuation_proof": null,
+      "binding": {
+        "agent_id": "assistant",
+        "principal_id": "alice@acme.com",
+        "type": "principal_agent"
+      },
+      "charter_id": "charter:alice@acme.com:assistant:parent",
+      "clauses": [
+        {
+          "id": "P1",
+          "private_fields": null,
+          "text": "Research.",
+          "type": "scope"
+        },
+        {
+          "id": "P2",
+          "private_fields": null,
+          "text": "Summarize.",
+          "type": "scope"
+        },
+        {
+          "id": "P3",
+          "private_fields": null,
+          "text": "Marketing copy.",
+          "type": "out_of_scope"
+        },
+        {
+          "id": "P4",
+          "private_fields": null,
+          "text": "External contact.",
+          "type": "approval_required"
+        }
+      ],
+      "decision_schema": {
+        "decision": "allow | needs_approval | incompatible",
+        "matched_clauses": "[{id, local_decision, applied, confidence in [0,1], reason}]",
+        "reason": "string -- short summary referencing applied clauses",
+        "rewrite_available": "bool -- whether propose_within_scope might help"
+      },
+      "issuer": {
+        "id": "alice@acme.com",
+        "relationship_to_principal": "self",
+        "type": "human"
+      },
+      "lifecycle": {
+        "issued_at": "2026-05-23T12:00:00Z",
+        "replaced_by": null,
+        "replaces": null,
+        "revoked_at": null,
+        "status": "active",
+        "valid_until": "2026-06-22T12:00:00Z"
+      },
+      "parent_charter_url": null,
+      "principal": {
+        "id": "alice@acme.com",
+        "role_summary": "Researcher at Acme Corp.",
+        "type": "human"
+      },
+      "principal_chain": [],
+      "provenance": {
+        "generated_at": "2026-05-23T12:00:00Z",
+        "issuer_kid": null,
+        "issuer_public_key": "ed25519:iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+        "issuer_signature": "",
+        "source_commitments": [
+          {
+            "content_hash": "sha256:abababababababababababababababababababababababababababababababab",
+            "description": "alice's profile",
+            "type": "profile_yaml"
+          }
+        ],
+        "transparency_log_id": null
+      },
+      "summary": {
+        "plain_language": "A research agent operating within Alice's scope."
+      },
+      "version": "0.1",
+      "visibility": {
+        "charter": "public",
+        "private_clauses": "not_supported_in_v0",
+        "raw_principal_context": "private"
+      }
+    }
+  },
+  "name": "Reject when attenuation_proof.parent_charter_id mismatches",
+  "spec_section": "SPEC.md#61-strict-string-based-mandatory"
+}

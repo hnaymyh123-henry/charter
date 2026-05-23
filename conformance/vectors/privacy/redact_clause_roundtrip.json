@@ -1,0 +1,34 @@
+{
+  "expected_error": null,
+  "expected_output": {
+    "disclosures": [
+      {
+        "disclosure_hash": "sha256:09a51530f5ae8ca123cec46f151f41bfa69c84a6fa98ba4fc6f5b639601f4d9f",
+        "disclosure_id": "09a51530",
+        "salt_hex": "0123456789abcdef0123456789abcdef",
+        "span_value": "Alice Wonderlan"
+      }
+    ],
+    "private_fields": [
+      {
+        "disclosure_hash": "sha256:09a51530f5ae8ca123cec46f151f41bfa69c84a6fa98ba4fc6f5b639601f4d9f",
+        "span_end": 35,
+        "span_start": 16
+      }
+    ],
+    "redacted_text": "Handle customer [REDACTED:09a51530]d with care."
+  },
+  "input": {
+    "clause_text": "Handle customer Alice Wonderland with care.",
+    "operation": "redact_clause",
+    "private_spans": [
+      [
+        16,
+        31
+      ]
+    ],
+    "salt_hex": "0123456789abcdef0123456789abcdef"
+  },
+  "name": "redact_clause produces matching placeholder + disclosure under fixed salt",
+  "spec_section": "SPEC.md#101-per-span-redaction"
+}
