@@ -50,3 +50,20 @@ jobs:
 
       - name: Pytest
         run: uv run pytest -q
+
+      # Adversarial suite (Issue #29). Failures here surface as warnings
+      # rather than blocking the main pipeline — we want regressions in
+      # known-defended attack vectors to be loud without taking the build
+      # down. See docs/threat-model.md for the catalogue of vectors and
+      # known-broken cases (which run as xfail and therefore do not fail
+      # this step).
+      - name: Pytest (adversarial — non-blocking)
+        id: adversarial
+        continue-on-error: true
+        run: |
+          uv run pytest tests/adversarial -v --tb=short
+
+      - name: Annotate adversarial result
+        if: steps.adversarial.outcome == 'failure'
+        run: |
+          echo "::warning::Adversarial test suite has failures. See the previous step's output and docs/threat-model.md."
