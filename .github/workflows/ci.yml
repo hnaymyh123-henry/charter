@@ -67,3 +67,43 @@ jobs:
         if: steps.adversarial.outcome == 'failure'
         run: |
           echo "::warning::Adversarial test suite has failures. See the previous step's output and docs/threat-model.md."
+
+  # Perf baseline (Issue #43, B3.10). Opt-in via `[bench]` in the head
+  # commit message. Runs the `benchmarks/` suite and uploads the JSON
+  # report as an artifact. Does NOT block the default PR flow — perf
+  # regressions are reviewed manually before release (see
+  # docs/performance.md §4 for the policy).
+  benchmark:
+    name: benchmark (opt-in via [bench])
+    if: contains(github.event.head_commit.message, '[bench]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install package with dev extras
+        run: |
+          uv venv --python 3.12
+          uv pip install -e ".[dev]"
+
+      - name: Run benchmarks
+        run: |
+          uv run pytest benchmarks/ --benchmark-only \
+            --benchmark-json=bench-report.json
+
+      - name: Upload benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: charter-bench-report
+          path: bench-report.json
+          if-no-files-found: warn
+          retention-days: 30
