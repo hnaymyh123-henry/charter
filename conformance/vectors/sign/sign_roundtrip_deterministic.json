@@ -1,0 +1,90 @@
+{
+  "expected_error": null,
+  "expected_output": {
+    "issuer_kid": "34750f98bd59fcfc",
+    "issuer_signature": "ed25519:k9JeU4nEli6Z//lOA7wDidizOpNMFa/6o93LjVTbOg5zvNxUU8oVeIGVX5GM0QoVQgONq5ZfZB8h0eqmIDdqAw=="
+  },
+  "input": {
+    "charter": {
+      "agent_operator": {
+        "agent_card_url": null,
+        "id": "acme_research_operator",
+        "type": "service"
+      },
+      "attenuation_proof": null,
+      "binding": {
+        "agent_id": "research_agent",
+        "principal_id": "alice@acme.com",
+        "type": "principal_agent"
+      },
+      "charter_id": "charter:alice@acme.com:research_agent:2026-05-23",
+      "clauses": [
+        {
+          "id": "C-001",
+          "private_fields": null,
+          "text": "Research scientific literature.",
+          "type": "scope"
+        },
+        {
+          "id": "C-002",
+          "private_fields": null,
+          "text": "Marketing copy.",
+          "type": "out_of_scope"
+        }
+      ],
+      "decision_schema": {
+        "decision": "allow | needs_approval | incompatible",
+        "matched_clauses": "[{id, local_decision, applied, confidence in [0,1], reason}]",
+        "reason": "string -- short summary referencing applied clauses",
+        "rewrite_available": "bool -- whether propose_within_scope might help"
+      },
+      "issuer": {
+        "id": "alice@acme.com",
+        "relationship_to_principal": "self",
+        "type": "human"
+      },
+      "lifecycle": {
+        "issued_at": "2026-05-23T12:00:00Z",
+        "replaced_by": null,
+        "replaces": null,
+        "revoked_at": null,
+        "status": "active",
+        "valid_until": "2026-06-22T12:00:00Z"
+      },
+      "parent_charter_url": null,
+      "principal": {
+        "id": "alice@acme.com",
+        "role_summary": "Researcher at Acme Corp.",
+        "type": "human"
+      },
+      "principal_chain": [],
+      "provenance": {
+        "generated_at": "2026-05-23T12:00:00Z",
+        "issuer_kid": null,
+        "issuer_public_key": "ed25519:iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+        "issuer_signature": "",
+        "source_commitments": [
+          {
+            "content_hash": "sha256:abababababababababababababababababababababababababababababababab",
+            "description": "alice's profile",
+            "type": "profile_yaml"
+          }
+        ],
+        "transparency_log_id": null
+      },
+      "summary": {
+        "plain_language": "A research agent operating within Alice's scope."
+      },
+      "version": "0.1",
+      "visibility": {
+        "charter": "public",
+        "private_clauses": "not_supported_in_v0",
+        "raw_principal_context": "private"
+      }
+    },
+    "operation": "sign",
+    "private_key_seed_hex": "0101010101010101010101010101010101010101010101010101010101010101"
+  },
+  "name": "Deterministic Ed25519 signing under fixed seed",
+  "spec_section": "SPEC.md#2--ed25519-sign--verify-invariant-1-adr-002"
+}

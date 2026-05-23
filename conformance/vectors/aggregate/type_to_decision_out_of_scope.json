@@ -1,0 +1,12 @@
+{
+  "expected_error": null,
+  "expected_output": {
+    "local_decision": "incompatible"
+  },
+  "input": {
+    "clause_type": "out_of_scope",
+    "operation": "type_to_decision"
+  },
+  "name": "TYPE_TO_DECISION['out_of_scope'] = 'incompatible'",
+  "spec_section": "SPEC.md#3--type_to_decision-invariant-2-adr-004"
+}

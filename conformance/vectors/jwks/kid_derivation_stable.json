@@ -1,0 +1,13 @@
+{
+  "expected_error": null,
+  "expected_output": {
+    "kid": "34750f98bd59fcfc",
+    "kid_length_chars": 16
+  },
+  "input": {
+    "operation": "kid_for_public_key",
+    "public_key": "ed25519:iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w="
+  },
+  "name": "kid is first 16 hex chars of sha256(raw_public_key)",
+  "spec_section": "SPEC.md#72-kid-derivation"
+}

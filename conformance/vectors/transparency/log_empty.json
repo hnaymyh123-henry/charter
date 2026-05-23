@@ -1,0 +1,14 @@
+{
+  "expected_error": null,
+  "expected_output": {
+    "entries": 0,
+    "head_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "ok": true
+  },
+  "input": {
+    "entries": [],
+    "operation": "verify_log_chain"
+  },
+  "name": "Empty log verifies trivially with head=genesis",
+  "spec_section": "SPEC.md#83-verification"
+}

@@ -1,0 +1,15 @@
+{
+  "expected_error": null,
+  "expected_output": {
+    "aggregate_decision": "needs_approval"
+  },
+  "input": {
+    "local_decisions": [
+      "allow",
+      "needs_approval"
+    ],
+    "operation": "aggregate_decision"
+  },
+  "name": "Aggregate (needs_approval beats allow)",
+  "spec_section": "SPEC.md#4--aggregate-verdict-invariant-3-adr-005"
+}

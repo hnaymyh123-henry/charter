@@ -1,0 +1,12 @@
+{
+  "expected_error": null,
+  "expected_output": {
+    "local_decision": "needs_approval"
+  },
+  "input": {
+    "clause_type": "operational_limit",
+    "operation": "type_to_decision"
+  },
+  "name": "TYPE_TO_DECISION['operational_limit'] = 'needs_approval'",
+  "spec_section": "SPEC.md#3--type_to_decision-invariant-2-adr-004"
+}

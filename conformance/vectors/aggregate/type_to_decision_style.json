@@ -1,0 +1,12 @@
+{
+  "expected_error": null,
+  "expected_output": {
+    "local_decision": "allow"
+  },
+  "input": {
+    "clause_type": "style",
+    "operation": "type_to_decision"
+  },
+  "name": "TYPE_TO_DECISION['style'] = 'allow'",
+  "spec_section": "SPEC.md#3--type_to_decision-invariant-2-adr-004"
+}
