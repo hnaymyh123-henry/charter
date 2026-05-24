@@ -55,9 +55,9 @@ try:
 
     _OTEL_AVAILABLE = True
 except ImportError:  # pragma: no cover - exercised in the no-OTel test path
-    _otel_trace = None  # type: ignore[assignment]
-    Status = None  # type: ignore[assignment,misc]
-    StatusCode = None  # type: ignore[assignment,misc]
+    _otel_trace = None  # type: ignore[assignment,unused-ignore]
+    Status = None  # type: ignore[assignment,misc,unused-ignore]
+    StatusCode = None  # type: ignore[assignment,misc,unused-ignore]
     _OTEL_AVAILABLE = False
 
 
