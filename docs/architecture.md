@@ -27,7 +27,7 @@ Roadmap shorthand used below:
 | **A1** | Chain semantic subset check (LLM-based) |
 | **A5** | AP2 Mandate integration |
 | **A6** | Web Bot Auth signed-header adapter |
-| **A8** | Postgres reference adapter (capability-boundary sample) |
+| **A8** | Postgres reference adapter (capability-boundary sample) — **SHIPPED v0.9** |
 | **Priv-1** | Privacy layer path 1 — Redaction + SD-JWT |
 | **B1.1** | Conformance test suite |
 | **B1.2** | JS / TS SDK |
@@ -70,7 +70,7 @@ flowchart TB
 
     subgraph PLANNED_LAYERS["Planned Layers (forward-looking)"]
         EDGE["Edge Proxy<br/>(Cloudflare + Web Bot Auth)<br/>SHIPPED A6 (adapter+middleware)"]
-        RG["Resource Gateway<br/>(Postgres / Stripe / FS / tools)<br/>PLANNED A8"]
+        RG["Resource Gateway<br/>(Postgres / Stripe / FS / tools)<br/>SHIPPED A8 (charter.adapters.postgres)"]
         INSP["Inspector Web UI<br/>SHIPPED B3.8"]
         AP2["AP2 Mandate Verifier<br/>PLANNED A5"]
     end
@@ -108,8 +108,8 @@ flowchart TB
     classDef deferred fill:#f3f4f6,stroke:#6b7280,color:#000,stroke-dasharray: 2 2
     classDef external fill:#e0e7ff,stroke:#4338ca,color:#000
 
-    class P,ISS,PROF,SRV,TLOG,JWKS,PINS,DISC,CA,WA,AO,EDGE,INSP shipped
-    class RG,AP2 planned
+    class P,ISS,PROF,SRV,TLOG,JWKS,PINS,DISC,CA,WA,AO,EDGE,INSP,RG shipped
+    class AP2 planned
     class MEMORY deferred
     class HTTPS external
 ```
@@ -123,10 +123,11 @@ flowchart TB
   components SHIPPED in v0.5 → v0.8.
 - **Delegation Path**: who actually calls whom at runtime. The Calling
   Agent's own LLM is the judge (PRODUCT.md §5.4).
-- **Planned Layers**: the next ring of trust — Web Bot Auth (A6) puts
-  Charter awareness at the network edge; Resource Gateway (A8) moves
-  the check from voluntary to enforced; AP2 verifier (A5) ties Charter
-  into the payment-mandate stack.
+- **Planned / Shipped Layers**: the next ring of trust — Web Bot Auth
+  (A6) puts Charter awareness at the network edge; Resource Gateway
+  (A8 SHIPPED v0.9 as `charter.adapters.postgres`) moves the check
+  from voluntary to enforced at the resource side; AP2 verifier (A5)
+  ties Charter into the payment-mandate stack.
 
 ---
 
@@ -219,7 +220,7 @@ sequenceDiagram
     participant TLOG as Transparency Log
     participant ISS as Issuer<br/>(step-up only)
     participant WA as Worker Agent
-    participant RG as Resource Gateway<br/>(PLANNED A8)
+    participant RG as Resource Gateway<br/>(SHIPPED A8 — charter.adapters.postgres)
 
     Note over CA,WA: SHIPPED path (v0.8)
 
@@ -259,13 +260,13 @@ sequenceDiagram
         ISS-->>CA: AdHocGrant (short TTL, task-bound)
     end
 
-    rect rgb(254, 243, 199)
-        CA->>RG: call resource (Signature header carries charter_url)  [A6 + A8]
+    rect rgb(220, 252, 231)
+        CA->>RG: call resource (Signature header / charter_url startup param)  [A6 + A8 SHIPPED]
         RG->>SRV: fetch + verify charter
         SRV-->>RG: Charter JSON
         RG->>RG: run aggregate_verdict locally
         alt verdict != allow
-            RG-->>CA: 403 + audit log entry
+            RG-->>CA: 403 / PG ErrorResponse 42501 + audit log entry
         else
             RG-->>CA: resource result
         end
@@ -287,7 +288,13 @@ sequenceDiagram
   + four covered components + custom `charter_url` parameter) plus a
   FastAPI gated middleware that reuses `_fetch_and_verify` so the
   trust order (signature → JWKS → pin → lifecycle) is identical at the
-  edge and at the calling agent.
+  edge and at the calling agent. **A8 also ships in v0.9** as
+  `charter.adapters.postgres` — an asyncio TCP proxy that sniffs the
+  PG wire protocol, runs `aggregate_verdict` on every Simple Query
+  and Parse, and refuses with a PG `ErrorResponse` (SQLSTATE 42501)
+  when the verdict is not `allow`. Reference implementation, not a
+  production DB front; designed as a template third parties can
+  port to Stripe / S3 / arbitrary tools.
 - **B2.5 step-up** is the dual of `propose_within_scope`: instead of
   rewriting the task to fit the Charter, it temporarily widens the
   Charter to fit the task.
@@ -367,7 +374,7 @@ flowchart TB
         F2["Anthropic SDK / Claude Agent SDK<br/>DEFERRED (user preference: low priority)"]
         F3["Web Bot Auth (RFC 9421)<br/>SHIPPED A6 (Ed25519 subset + gated middleware)"]
         F4["AP2 Mandate carrier<br/>PLANNED A5"]
-        F5["Postgres reference proxy<br/>PLANNED A8"]
+        F5["Postgres reference proxy<br/>SHIPPED A8 (sqlglot + asyncio TCP)"]
     end
 
     subgraph ECOSYSTEM["Ecosystem Surface"]
@@ -386,8 +393,8 @@ flowchart TB
     class E1,E2,E3,E4,E5,E6,E7,E8,E9,E12,E10A,E10B,E10C shipped
     class E13,E14 planned
     class E11 deferred
-    class T1,T2,T3,T4,T5,T6,T7,T10,F1,F3 shipped
-    class T8,T9,F4,F5 planned
+    class T1,T2,T3,T4,T5,T6,T7,T10,F1,F3,F5 shipped
+    class T8,T9,F4 planned
     class F2 deferred
     class ES1,ES2,ES3,ES4,ES5,ES6 planned
 ```
@@ -430,7 +437,7 @@ flowchart TB
         D3["SHA-256-chained transparency log<br/>(append-only, third-party auditable)<br/>SHIPPED v0.8"]
         D4["Revocation propagation<br/>(Cache-Control + /transparency/revoked)<br/>SHIPPED B1.3"]
         D5["Adversarial test suite + threat model doc<br/>PLANNED B1.4"]
-        D6["Resource Gateway enforcement<br/>(Postgres reference + pattern doc)<br/>PLANNED A8"]
+        D6["Resource Gateway enforcement<br/>(Postgres reference + pattern doc)<br/>SHIPPED A8 (charter.adapters.postgres)"]
     end
 
     T1 --- D1
@@ -445,8 +452,8 @@ flowchart TB
     classDef threat fill:#fee2e2,stroke:#dc2626,color:#000
 
     class T1,T2,T3,T4,T5,T6 threat
-    class D1,D2,D3,D4 shipped
-    class D5,D6 planned
+    class D1,D2,D3,D4,D6 shipped
+    class D5 planned
 ```
 
 **Reading guide.**
@@ -468,9 +475,11 @@ flowchart TB
 - Notice row 6 (A8 Postgres reference) is the only one that converts
   Charter from a **Delegation Gate** (cooperating callers) to
   **Capability-Boundary Enforcement** (mandatory). The reference
-  adapter doesn't ship the whole gate — it ships the *pattern* so
-  third parties can build adapters for Stripe / S3 / arbitrary tool
-  runtimes.
+  adapter (`charter.adapters.postgres`, **SHIPPED v0.9**) doesn't
+  ship the whole gate — it ships the *pattern* so third parties can
+  build adapters for Stripe / S3 / arbitrary tool runtimes. The
+  voluntary stance of the protocol itself (ADR-006) is unchanged;
+  installing the adapter remains a deployment choice.
 
 ---
 
@@ -489,7 +498,7 @@ sequenceDiagram
     participant LLM as Grader LLM
     participant EDGE as Cloudflare Edge<br/>(A6 PLANNED)
     participant WA as Customer DB<br/>service
-    participant RG as Postgres Proxy<br/>(A8 PLANNED)
+    participant RG as Postgres Proxy<br/>(A8 SHIPPED v0.9)
     participant DB as Postgres
 
     U->>CA: "export all customer records to S3"
