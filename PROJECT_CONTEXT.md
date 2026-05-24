@@ -44,13 +44,14 @@
 
 ## 当前状态(本节频繁更新)
 
-- **最后更新**:2026-05-23
-- **当前迭代目标**:**v0.9 — Production-readiness + 生态扩散**。Batch 1 已 ✓ 全部合并(PR #32-#37,2026-05-23)。
+- **最后更新**:2026-05-24
+- **当前迭代目标**:**v0.9 — Production-readiness + 生态扩散**。Batch 1 + Batch 2 全部合并(12 PRs + 1 hotfix)。
   - **Batch 1(已合并 6 个)**: #36 Adversarial → #33 Web Bot Auth → #37 Cookbook → #32 AP2 → #34 Chain semantic → #35 Priv-1
-  - **Batch 2(下一步 6 个)**: #8 Revocation propagation → #12 Inspector UI → #14 OTel(server.py 串行);并行 #5 Postgres adapter、#10 Conformance suite、#15 Perf baseline
-  - **Batch 3(blocked 2 个)**: #11 JS SDK(等 #10)、#13 Step-up(等 A5 已合并,可启动)
-- **开放 PR**:无(main 干净,已 fast-forward 到 28ff93c)
-- **已知技术债**:见 [`docs/feature-log.md`](docs/feature-log.md) 底部(v0.9 Batch 1 retro 新增 4 条)
+  - **Batch 2(已合并 6 个)**: #49 Perf → #47 Conformance → #46 OTel → #45 Revocation → #44 Inspector(rebased) → #48 Postgres(rebased) + 5ebc6f3 OTel CI hotfix
+  - **Batch 3(blocker 全解除,2 个 + 可选)**: #11 JS SDK(B1.1 已合,可启动)、#13 Step-up(A5 已合,可启动);可选 ADR-011 path 2 delegated grading
+- **开放 PR**:无(main 干净,fast-forward 到 8c11764)
+- **测试基线**:439 collected(原 363 + 76 net new across Batch 2)
+- **已知技术债**:见 [`docs/feature-log.md`](docs/feature-log.md) 底部(v0.9 Batch 1 + Batch 2 retro 共新增 9 条)
 
 ---
 

@@ -6,6 +6,16 @@
 
 ## 已完成
 
+### v0.9.0 — Batch 2: 协议生态 + capability 演进(2026-05-23 → 2026-05-24 合并,PR #44-#49 + hotfix 5ebc6f3)
+- A8 Postgres reference adapter — capability-boundary 模式 reference,fail-closed PG wire proxy,PRODUCT.md §5.6 + ADR-006 演进措辞(PR #48 / Issue #41,~700 LOC + 37 tests)
+- B1.1 Conformance test suite — language-neutral 44 JSON vectors + SPEC.md + Python runner(完整)+ JS/Rust skeleton runner,CI gate(PR #47 / Issue #42)
+- B1.3 Revocation propagation — Cache-Control middleware + `/transparency/revoked` NDJSON + RevocationAwareCache client SDK helper(PR #45 / Issue #38)
+- B2.7 OTel observability — `charter/observability.py` no-op fallback + 6 个 span(charter.* 私有 namespace) + docs/observability.md(PR #46 / Issue #40)
+- B3.8 Inspector Web UI — `/inspect` + HTMX/Alpine.js + URL allowlist + SSRF guard,QA 32/32 PoC clean(PR #44 / Issue #39)
+- B3.10 Performance baseline — `benchmarks/` 5 文件 + pytest-benchmark + docs/performance.md + CI opt-in `[bench]` gate(PR #49 / Issue #43)
+- OTel CI regression hotfix — `unused-ignore` 处理 cross-env mypy(commit 5ebc6f3)
+- 累计 +133 个新测试(363 → 474+);测试 collect 涨到 439
+
 ### v0.9.0 — Batch 1: Production-readiness + 协议扩展(2026-05-22 → 2026-05-23 合并,PR #32-#37)
 - A1 Chain 语义子集校验 (LLM-based `verify_chain_semantic`,MCP tool #11,新 `CharterChainGraderError`,PR #34 / Issue #26)
 - A5 AP2 Mandate 集成 (`charter/adapters/ap2.py` + `AP2VerifyResult` schema + 端到端 demo,PR #32 / Issue #27)
@@ -64,3 +74,8 @@
 | Worker Agent worktree 在 PR 创建成功后未自动释放,导致 fix worker 不得不在已有 worktree 工作。下轮 worker prompt 加 `ExitWorktree action=remove` 自释放 | v0.9 Batch 1 retro | 2026-05-23 |
 | Fix worker 重派(token 过期场景)的 prompt 缺"先 git log/git status 校对上轮成果"强制 step —— PR #32 第一次成功 push 但 PR comment 失败,差点重做。下轮模板加 | v0.9 Batch 1 retro | 2026-05-23 |
 | 安全相关模块的 worker prompt 缺"allowlist 优先 + 必 grep 所有调用方 + 必 pathlib boundary check"checklist。PR #35 三轮 QA 的根因 | v0.9 Batch 1 retro | 2026-05-23 |
+| `docs/architecture.md` 是 single 545-行 forward-looking doc,每 PR 都改不同 section,Batch 2 5 个 PR 都改同文件触发 GitHub auto-resolve 失败 → 考虑拆分 `docs/architecture/{system-context,issuance,runtime,topology,trust,e2e}.md` 单独维护(中优先级) | v0.9 Batch 2 retro | 2026-05-24 |
+| OTel CI regression(unused-ignore)说明 worker 在引入 optional-dep 模块时缺"两种 env 跑 mypy"验证。下轮 prompt 加:optional-dep 改动后必须 confirm `pip install -e '.[dev]'`(不含 optional)env 下 mypy strict 也通过 | v0.9 Batch 2 retro | 2026-05-24 |
+| Worker self-cleanup:`ExitWorktree` 在 subagent context 不可用是 harness 限制(非 worker 失职),Tech Lead 每次 Batch 结束都得手动清 orphaned worktrees。考虑请求 harness 提供 "PR-create 后自动 worktree teardown" 钩子 | v0.9 Batch 2 retro | 2026-05-24 |
+| Rebase Worker 是 Batch 2 新出现且表现良好的角色 — 应固化为 `worker-rebase.md` 模板,跟 worker-fix.md / worker-new.md 并列 | v0.9 Batch 2 retro | 2026-05-24 |
+| ROADMAP.md 已知技术债:v0.8 + v0.9 还未打 git tag(v0.5/0.6/0.7 都有),可以在 Batch 3 启动前补上 `git tag v0.8.0` + `git tag v0.9-batch2-rc1` | v0.9 Batch 2 retro | 2026-05-24 |

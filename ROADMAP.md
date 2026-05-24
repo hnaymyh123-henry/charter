@@ -222,21 +222,40 @@ together:
 Cumulative: +11.6k lines, +104 new tests (259 → 363+), tagged ADR-003
 disclosure exception + ADR-010 string fallback + ADR-011 path-1 SHIPPED.
 
-### Batch 2 — server.py serial + parallel (NEXT)
+### Batch 2 — SHIPPED 2026-05-24 (6 PRs + 1 hotfix)
 
-Three PRs touch `charter/server.py` and need serial merge order:
-**B1.3 Revocation propagation** → **B3.8 Inspector Web UI** → **B2.7 OTel
-semconv**. Parallel to those: **A8 Postgres reference adapter** (capability-
-boundary proof, `~500-800 LOC` standalone), **B1.1 Conformance test suite**
-(language-neutral fixtures, new repo `charter-conformance`), and **B3.10
-Performance baseline** (`benchmarks/` with `pytest-benchmark`).
+- **A8 Postgres reference adapter** — capability-boundary proof,
+  `charter/adapters/postgres/` ~700 LOC, fail-closed PG wire proxy,
+  PRODUCT.md §5.6 + ADR-006 evolution wording (PR #48 / Issue #41).
+- **B1.1 Conformance test suite** — language-neutral 44 JSON vectors,
+  SPEC.md, Python runner (complete), JS / Rust skeleton runners,
+  CI gate (PR #47 / Issue #42).
+- **B1.3 Revocation propagation** — Cache-Control middleware +
+  `GET /transparency/revoked` NDJSON + `RevocationAwareCache` SDK
+  helper (PR #45 / Issue #38).
+- **B2.7 OTel semconv** — `charter/observability.py` no-op fallback +
+  6 spans (private `charter.*` namespace) + `docs/observability.md`
+  (PR #46 / Issue #40). Hotfix `5ebc6f3` for `unused-ignore` CI
+  regression follows.
+- **B3.8 Charter Inspector Web UI** — `/inspect` route, HTMX/Alpine.js,
+  URL allowlist + SSRF guard, QA verified 32/32 attack PoC (PR #44 /
+  Issue #39).
+- **B3.10 Performance baseline** — `benchmarks/` (5 files), pytest-
+  benchmark, `docs/performance.md`, CI opt-in `[bench]` gate (PR #49 /
+  Issue #43).
 
-### Batch 3 — unblocked after Batch 1 / 2
+Cumulative across Batch 2: +133 tests (363 → 474+), 439 collected
+post-merge.
 
-- **B1.2 JavaScript / TypeScript SDK** (`charter-js`, blocked by B1.1
-  conformance suite landing first).
+### Batch 3 — unblocked, ready to start
+
+- **B1.2 JavaScript / TypeScript SDK** (`charter-js`) — B1.1
+  conformance suite ships, blocker removed.
 - **B2.5 Negotiation / step-up protocol** (`request_step_up` MCP tool +
-  `AdHocGrant` schema; A5 already SHIPPED so this is now unblocked).
+  `AdHocGrant` schema) — A5 (AP2) SHIPPED, blocker removed.
+- Optional: ADR-011 path 2 (delegated grading endpoint) — pulled
+  forward from "Beyond v0.9 deferred" if user wants the privacy stack
+  to grow.
 
 ---
 
