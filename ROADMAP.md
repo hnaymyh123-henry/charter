@@ -247,15 +247,46 @@ disclosure exception + ADR-010 string fallback + ADR-011 path-1 SHIPPED.
 Cumulative across Batch 2: +133 tests (363 → 474+), 439 collected
 post-merge.
 
-### Batch 3 — unblocked, ready to start
+### Batch 3 — PRs open 2026-05-26 (2 features + 1 chore)
 
-- **B1.2 JavaScript / TypeScript SDK** (`charter-js`) — B1.1
-  conformance suite ships, blocker removed.
-- **B2.5 Negotiation / step-up protocol** (`request_step_up` MCP tool +
-  `AdHocGrant` schema) — A5 (AP2) SHIPPED, blocker removed.
-- Optional: ADR-011 path 2 (delegated grading endpoint) — pulled
-  forward from "Beyond v0.9 deferred" if user wants the privacy stack
-  to grow.
+- **B2.5 Negotiation / step-up protocol** — PR #53 / Issue #51.
+  `AdHocGrant` schema + Ed25519 signing + `data/grants/<id>.json`
+  storage with path-traversal defense + `POST /step-up` (3 approval
+  modes: `auto-deny` / `auto-approve` / `callback`) + rate-limit
+  `(principal_id, agent_id) ≤ 5 / 60s` + `GET /grants/{id}` (404 / 410
+  surface) + MCP tool 12 `request_step_up` (HTTP-forward only) + AP2
+  mandate `extensions.ad_hoc_grant_id` extension that promotes
+  Charter verdict `incompatible`/`needs_approval` → `allow` when a
+  verified grant covers the task. ~1759 LOC + 56 new tests. Grants
+  are **not** transparency-logged in v0.9 (ADR-013 future-work).
+- **B1.2 JavaScript / TypeScript SDK** — PR #54 / Issue #50.
+  `@charter/core` (`js/` subtree). Verification-only TS port:
+  schema (zod), canonical bytes, Ed25519 sign/verify (`@noble/ed25519`
+  v2), aggregate, strict chain, lifecycle, JWK + kid, pin fingerprint,
+  transparency log, SD-JWT path 1 privacy. 12 source files / 1352 LOC
+  + 11 vitest files / 110 cases (all green); 4 cross-language vectors
+  from `conformance/vectors/sign/` anchor byte equivalence with the
+  Python reference. `tsup` dual-format (ESM + CJS + `.d.ts`).
+- **chore: env-fix follow-ups** — PR #55. Tightens
+  `pytest.importorskip("opentelemetry")` → `opentelemetry.sdk` (the
+  api package is often transitively installed, the SDK is not);
+  adds `pytest.importorskip("sqlglot")` to the postgres adapter tests
+  so a `[dev]`-only env skips them cleanly instead of erroring at
+  collection; and pays down the 3 pre-existing `inspector.py`
+  `no-any-return` mypy errors. Net: full suite goes from 6 failures
+  + 10 errors + 2 collection errors → **427 passed, 12 skipped,
+  2 xfailed**; `mypy charter/` is clean (32 files).
+- Optional / not picked up: ADR-011 path 2 (delegated grading
+  endpoint) — pulled forward from "Beyond v0.9 deferred" if the
+  privacy stack should grow next. Punted to keep Batch 3 focused.
+
+**Phase 4 status (2026-05-26):** all 3 PRs opened, awaiting code
+review. Local pre-flight:
+- B2.5: 56/56 new tests pass, ruff + mypy clean on diff.
+- B1.2: 110/110 vitest cases pass, `tsc --noEmit` clean, `tsup` build
+  succeeds.
+- chore: full pytest suite green in `[dev]` env, `mypy charter/`
+  clean, `ruff check` clean.
 
 ---
 

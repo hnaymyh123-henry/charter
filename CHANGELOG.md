@@ -9,6 +9,47 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **Step-up protocol — AdHocGrant + `request_step_up` (B2.5)** — PR #53.
+  The dual of `propose_within_scope`. Where the rewrite path adjusts the
+  *task* to fit the Charter, an `AdHocGrant` temporarily authorises the
+  *task* outside the Charter's normal scope. A grant is a **sibling of
+  Charter, not a child** — no Charter field is mutated. Signed with the
+  same Ed25519 issuer key (ADR-002), canonical-bytes rule mirrors
+  Charter's (`issuer_signature` cleared, ADR-003), and has no `revoked`
+  lifecycle state — short TTL (60s ≤ delta ≤ 3600s) is the only safety
+  primitive (ADR-013). New `charter.grants` module persists grants under
+  `data/grants/<grant_id>.json`. `POST /step-up` runs rate-limit
+  `(principal_id, agent_id) ≤ 5 / 60s` then dispatches per
+  `CHARTER_STEPUP_APPROVAL_MODE` (`auto-deny` default / `auto-approve` /
+  `callback`); `GET /grants/{id}` returns 200 / 404 / 410. MCP tool
+  `request_step_up` is HTTP-forward only — ADR-009 keeps the decision
+  policy server-side. AP2 adapter learns `extensions.ad_hoc_grant_id`:
+  a verified, unexpired grant whose `task` covers the mandate's task
+  promotes a Charter verdict of `incompatible` / `needs_approval` up
+  to `allow`; any failure leaves the Charter verdict untouched (no
+  fail-open). New errors `CharterGrantNotFoundError` /
+  `CharterGrantExpiredError` / `CharterGrantSignatureError`. Grants are
+  NOT transparency-logged in v0.9 (ADR-013 future-work).
+
+- **`@charter/core` SDK — JavaScript / TypeScript (B1.2)** — PR #54.
+  Verification-only TS/JS port of the Python reference, shipping under
+  `js/` (new subtree). Cross-language **byte-equivalent**: same canonical
+  bytes, same SHA-256 digests, same kid as Python — anchored by 4 of the
+  44 conformance vectors at `conformance/vectors/sign/`. 12 source files
+  / 1352 LOC: `schema.ts` (zod, `.strict()` per model), `canonical.ts`,
+  `signing.ts` (@noble/ed25519 v2, ADR-002), `aggregate.ts`, `chain.ts`
+  (strict 4-rule attenuation; `auto` mode degrades to strict — no LLM
+  client to thread), `lifecycle.ts` (4 classifications: revoked >
+  superseded > expired > usable), `jwks.ts` (kid + RFC 7517 JWK),
+  `pins.ts` (full sha256 fingerprint), `transparency.ts` (verifyLogChain
+  over parsed entries), `privacy.ts` (redactClause + verifyDisclosure +
+  matchRedacted), `constants.ts`. 11 vitest files / 110 cases — all
+  green. `tsup` dual-format (ESM + CJS + `.d.ts`); `tsc --noEmit` clean
+  under strict + noUnusedLocals + noUnusedParameters. Out of scope for
+  `@charter/core` (deferred to a future `@charter/server`): HTTP server,
+  MCP server, CLI, encrypted private keys at rest, JWKS HTTP fetch,
+  pin store, disclosure HTTP fetch, semantic chain mode.
+
 - **Charter Inspector Web UI (B3.8)** — `GET /inspect?url=<charter_url>` and
   `GET /inspect/{principal}/{agent}` render a fetched Charter as a
   human-readable HTML page with status badge, foldable clause list (Alpine.js),
@@ -22,6 +63,23 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   install hint and the rest of the server stays unaffected. SSRF guard
   rejects `file://`, `ftp://`, RFC 1918, loopback, and link-local targets
   unless `CHARTER_INSPECTOR_ALLOW_PRIVATE_NETS=1` (local-dev override).
+
+### Fixed
+
+- **Test-skip guards for optional extras** — PR #55. `test_observability.py`
+  changed `pytest.importorskip("opentelemetry")` →
+  `importorskip("opentelemetry.sdk")` so the skip triggers correctly when
+  `opentelemetry-api` is transitively installed but the SDK is not.
+  `tests/adapters/test_postgres_{intent,proxy}.py` gained module-level
+  `pytest.importorskip("sqlglot")` so a `[dev]`-only env (without the
+  `postgres_proxy` extra) skips them cleanly instead of erroring at
+  collection. Net: full suite goes from 6 failed + 10 errored + 2
+  collection errors → 427 passed / 12 skipped / 2 xfailed.
+
+- **`charter/inspector.py` mypy `no-any-return`** — PR #55. Bind
+  `jinja2.Template.render(...)` (typed as `Any`) to an explicit
+  `rendered: str` local in the three `render_*` helpers so
+  `mypy --strict` is clean on the full `charter/` tree (32 files).
 
 ## [0.8.0] — 2026-05-19 — Trust model upgrade
 

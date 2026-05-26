@@ -44,14 +44,15 @@
 
 ## 当前状态(本节频繁更新)
 
-- **最后更新**:2026-05-24
-- **当前迭代目标**:**v0.9 — Production-readiness + 生态扩散**。Batch 1 + Batch 2 全部合并(12 PRs + 1 hotfix)。
+- **最后更新**:2026-05-26
+- **当前迭代目标**:**v0.9 — Production-readiness + 生态扩散**。Batch 1 + Batch 2 全部合并(12 PRs + 1 hotfix);Batch 3 PR 已开,等待 Phase 4 review。
   - **Batch 1(已合并 6 个)**: #36 Adversarial → #33 Web Bot Auth → #37 Cookbook → #32 AP2 → #34 Chain semantic → #35 Priv-1
   - **Batch 2(已合并 6 个)**: #49 Perf → #47 Conformance → #46 OTel → #45 Revocation → #44 Inspector(rebased) → #48 Postgres(rebased) + 5ebc6f3 OTel CI hotfix
-  - **Batch 3(blocker 全解除,2 个 + 可选)**: #11 JS SDK(B1.1 已合,可启动)、#13 Step-up(A5 已合,可启动);可选 ADR-011 path 2 delegated grading
-- **开放 PR**:无(main 干净,fast-forward 到 8c11764)
-- **测试基线**:439 collected(原 363 + 76 net new across Batch 2)
-- **已知技术债**:见 [`docs/feature-log.md`](docs/feature-log.md) 底部(v0.9 Batch 1 + Batch 2 retro 共新增 9 条)
+  - **Batch 3(PR opened 2026-05-26)**: #53 B2.5 Step-up Protocol、#54 B1.2 JS SDK、#55 chore env-fixes(observability + postgres importorskip + inspector mypy)
+  - **未做**:ADR-011 path 2 delegated grading(可选,保持 Batch 3 聚焦)
+- **开放 PR**:#53(B2.5)、#54(B1.2)、#55(chore env-fixes),三者皆 awaiting Phase 4 review
+- **测试基线**:`[dev]` env 全套 **427 passed + 12 skipped + 2 xfailed** post-#55(原 439 collected,#55 把 postgres + observability 转为 skip-on-missing-extras);B2.5 分支 +56 个新测试,B1.2 分支 +110 个 vitest 用例
+- **已知技术债**:见 [`docs/feature-log.md`](docs/feature-log.md) 底部(v0.9 Batch 1 + Batch 2 + Batch 3 retro 共新增条目)
 
 ---
 
