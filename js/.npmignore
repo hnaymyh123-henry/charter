@@ -1,0 +1,17 @@
+# Source / test / build configuration — only the compiled `dist/` ships.
+src/
+tests/
+node_modules/
+*.log
+.tsbuildinfo
+tsconfig.json
+tsup.config.ts
+vitest.config.ts
+.gitignore
+.editorconfig
+coverage/
+
+# Editor / OS junk
+.DS_Store
+.vscode/
+.idea/
