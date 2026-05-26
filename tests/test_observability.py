@@ -43,7 +43,13 @@ from charter.observability import (
 def memory_exporter() -> Iterator[Any]:
     """Wire up an InMemorySpanExporter and yield it. Tears down provider
     state at the end so other tests aren't polluted."""
-    pytest.importorskip("opentelemetry")
+    # `opentelemetry-api` is often pulled in transitively (e.g. by other
+    # tracing-aware libs), so just checking for `opentelemetry` would skip
+    # too leniently — the import-time error here would be on
+    # `opentelemetry.sdk`. Pin the skip guard to the SDK package so this
+    # fixture only runs when `pip install -e .[dev,observability]` has
+    # actually been done.
+    pytest.importorskip("opentelemetry.sdk")
     from opentelemetry import trace
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor

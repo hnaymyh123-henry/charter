@@ -10,7 +10,12 @@ import dataclasses
 
 import pytest
 
-from charter.adapters.postgres.intent import SqlIntent, intent_from_sql
+# The intent extractor depends on `sqlglot` (in the `postgres_proxy` optional
+# extra, not `[dev]`). Skip the whole module if the extra isn't installed so
+# `pip install -e .[dev]` envs collect cleanly instead of erroring out.
+pytest.importorskip("sqlglot")
+
+from charter.adapters.postgres.intent import SqlIntent, intent_from_sql  # noqa: E402
 
 
 class TestOperationClassification:
