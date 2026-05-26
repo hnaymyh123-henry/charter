@@ -25,8 +25,14 @@ from typing import Any
 
 import pytest
 
-from charter.adapters.postgres.gate import _default_hits_grader
-from charter.adapters.postgres.proxy import CharterGatedProxy, _build_error_response
+# Proxy + gate transitively import `sqlglot` (in the `postgres_proxy` optional
+# extra). Skip the whole module if it isn't installed so a `[dev]`-only env
+# collects cleanly. Real-Postgres tests below have their own `requires_postgres`
+# marker on top of this.
+pytest.importorskip("sqlglot")
+
+from charter.adapters.postgres.gate import _default_hits_grader  # noqa: E402
+from charter.adapters.postgres.proxy import CharterGatedProxy, _build_error_response  # noqa: E402
 from charter.errors import CharterNotFoundError
 from charter.schema import (
     AgentOperator,

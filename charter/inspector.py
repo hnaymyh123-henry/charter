@@ -426,7 +426,9 @@ def render_charter(
     """
     env = _get_environment()
     tpl = env.get_template("inspect.html")
-    return tpl.render(
+    # `jinja2.Template.render` is typed as returning `Any`; pin to `str`
+    # so mypy --strict accepts the return.
+    rendered: str = tpl.render(
         charter=charter,
         charter_url=charter_url,
         verify_steps=build_verify_steps(charter, fetch_error),
@@ -438,6 +440,7 @@ def render_charter(
         # doesn't have to call len() inside a Jinja expression.
         clause_rows=[(c, len(c.private_fields or [])) for c in charter.clauses],
     )
+    return rendered
 
 
 def render_invalid_url(charter_url: str, reason: str) -> str:
@@ -449,12 +452,13 @@ def render_invalid_url(charter_url: str, reason: str) -> str:
     """
     env = _get_environment()
     tpl = env.get_template("error.html")
-    return tpl.render(
+    rendered: str = tpl.render(
         status_code=400,
         title="Invalid charter URL",
         message=reason,
         charter_url=charter_url,
     )
+    return rendered
 
 
 def render_fetch_error(charter_url: str, error: Exception) -> str:
@@ -467,12 +471,13 @@ def render_fetch_error(charter_url: str, error: Exception) -> str:
     """
     env = _get_environment()
     tpl = env.get_template("error.html")
-    return tpl.render(
+    rendered: str = tpl.render(
         status_code=502,
         title=type(error).__name__,
         message=str(error),
         charter_url=charter_url,
     )
+    return rendered
 
 
 # ---------------------------------------------------------------------------
