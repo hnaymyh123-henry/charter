@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .constants import CHARTER_VERSION
 
@@ -389,6 +389,112 @@ class Charter(BaseModel):
     # the subset relation against the parent fetched via this URL.
     parent_charter_url: str | None = None
     attenuation_proof: AttenuationProof | None = None
+
+
+# ---------------------------------------------------------------------------
+# AdHocGrant (B2.5 — step-up protocol, ADR-013)
+# ---------------------------------------------------------------------------
+
+
+class AdHocGrant(BaseModel):
+    """A short-TTL, task-bound, signed ad-hoc extension of issuer authority.
+
+    The dual of `propose_within_scope`. Where the rewrite path adjusts the
+    *task* to fit the Charter, an `AdHocGrant` temporarily authorises the
+    *task* outside the Charter's normal scope. The grant is **a sibling of
+    Charter, not a child** — no Charter field is mutated. A grant is
+    signed with the same Ed25519 issuer key as the Charter, has its own
+    canonical-bytes rule (sorted keys, `issuer_signature` excluded), and
+    has no `revoked` lifecycle state: short TTL is the only safety
+    primitive (ADR-013).
+
+    Why no `revoked` state: the threat model is "issuer wants to widen
+    authority for exactly this one task for exactly this many seconds".
+    Adding a `revoked` flag would require every consumer to fetch the
+    grant on every use; the design choice is instead to keep TTL short
+    (default 300s, max 3600s) and physically delete the grant file when
+    early teardown is needed. Charters keep their revoke story; grants
+    don't get one.
+
+    Why a Charter revoke does NOT invalidate live grants: a grant is its
+    own signed token. Once the issuer issues it, it stands on its own
+    feet until expiry. This avoids a stale-grants-after-revoke cache
+    invalidation problem at the cost of one design choice that ADR-013
+    spells out: revoking a Charter is the right tool for "this agent
+    can never act for me again"; grants are for "this one task in the
+    next 5 minutes". They are orthogonal.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    grant_id: str  # UUID v4 (hex)
+    charter_url: str  # the Charter this grant attaches to (NOT mutated)
+    task: str  # natural-language task description submitted by caller
+    justification: str  # caller-supplied reason, shown to principal at approval time
+    granted_at: datetime
+    expires_at: datetime  # short TTL, max 3600s by default
+    issuer_signature: str = ""  # "ed25519:<base64>"; set during signing
+    issuer_kid: str  # same kid as the underlying Charter's provenance.issuer_kid
+    approval_metadata: dict[str, str] | None = None  # optional context from approval
+
+    @model_validator(mode="after")
+    def _validate_ttl_bounds(self) -> AdHocGrant:
+        """Enforce TTL invariants:
+          - expires_at must be strictly after granted_at.
+          - expires_at - granted_at must be >= 60s (no instant-burn grants).
+          - expires_at - granted_at must be <= 3600s (the protocol cap).
+
+        These bounds protect both directions: a too-short TTL is racy
+        and undermines the step-up flow (caller cannot use it before
+        it expires); a too-long TTL erodes the "temporary widening"
+        invariant that justifies grants being short-cut tokens rather
+        than full charter modifications (ADR-013).
+        """
+        delta = (self.expires_at - self.granted_at).total_seconds()
+        if delta < 60:
+            raise ValueError(f"AdHocGrant TTL must be >= 60s (got {delta:.0f}s)")
+        if delta > 3600:
+            raise ValueError(f"AdHocGrant TTL must be <= 3600s (got {delta:.0f}s)")
+        return self
+
+
+class AdHocGrantRequest(BaseModel):
+    """Input to `POST /step-up`.
+
+    The caller asks the issuer to widen authority for one specific
+    task. `max_ttl_seconds` defaults to 300 (5 minutes); the server
+    caps it at `CHARTER_STEPUP_MAX_TTL` (default 3600s, set by env).
+    Anything above the cap returns 400.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    charter_url: str
+    task: str
+    justification: str
+    max_ttl_seconds: int = Field(default=300, ge=60)
+
+
+class AdHocGrantResponse(BaseModel):
+    """Output of `POST /step-up`.
+
+    Three outcomes:
+        approved:  The issuer signed a grant. `grant` is populated.
+        pending:   Asynchronous approval is in-flight (callback mode
+                   with non-immediate response). `grant` is None. The
+                   reference implementation does NOT use this state
+                   today — the callback hook is synchronous in v0.9.
+        denied:    The issuer refused (default `auto-deny` mode, or
+                   the callback target returned denial). `grant` is
+                   None and `denial_reason` carries a human-readable
+                   string.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["approved", "pending", "denied"]
+    grant: AdHocGrant | None = None
+    denial_reason: str | None = None
 
 
 # ---------------------------------------------------------------------------

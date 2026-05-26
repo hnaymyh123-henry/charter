@@ -94,6 +94,31 @@ class CharterChainGraderError(CharterError):
     swallow this exception to re-promote a string failure into a pass."""
 
 
+# ---------------------------------------------------------------------------
+# AdHocGrant errors (B2.5 — step-up protocol, ADR-013)
+# ---------------------------------------------------------------------------
+
+
+class CharterGrantNotFoundError(CharterError):
+    """The requested `grant_id` does not exist on disk (`data/grants/<id>.json`)
+    is absent or was revoked/deleted). Server endpoint `GET /grants/{id}`
+    surfaces this as 404."""
+
+
+class CharterGrantExpiredError(CharterError):
+    """The grant exists but its `expires_at` is in the past. Step-up grants
+    have no `revoked` lifecycle state — they are short-TTL by design and
+    simply expire (ADR-013). Server endpoint surfaces this as 410 Gone so
+    the caller can distinguish "never existed" from "existed but past TTL"."""
+
+
+class CharterGrantSignatureError(CharterError):
+    """The grant's `issuer_signature` did not verify against its embedded
+    issuer key. Either tampered with (task / charter_url / expires_at
+    changed after signing) or signed by a key that doesn't match the
+    Charter's issuer. Treated as not-a-valid-grant by every consumer."""
+
+
 __all__ = [
     "CharterError",
     "CharterNotFoundError",
@@ -106,4 +131,7 @@ __all__ = [
     "JWKSNotFoundError",
     "JWKSParseError",
     "CharterChainGraderError",
+    "CharterGrantNotFoundError",
+    "CharterGrantExpiredError",
+    "CharterGrantSignatureError",
 ]
