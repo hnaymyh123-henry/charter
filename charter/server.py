@@ -25,10 +25,16 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
+import time
+import uuid
+from collections import deque
 from collections.abc import Awaitable, Callable, Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -36,9 +42,25 @@ from fastapi.staticfiles import StaticFiles
 
 from . import revocation, transparency
 from .constants import DEFAULT_URL_BASE
-from .errors import CharterError, CharterSchemaError, CharterSignatureError
-from .signing import public_key_to_jwk
-from .storage import list_charters, list_known_issuer_keys, load_charter, load_disclosure
+from .errors import (
+    CharterError,
+    CharterGrantExpiredError,
+    CharterGrantNotFoundError,
+    CharterGrantSignatureError,
+    CharterSchemaError,
+    CharterSignatureError,
+)
+from .grants import load_grant as _load_grant
+from .grants import save_grant as _save_grant
+from .schema import AdHocGrant, AdHocGrantRequest, AdHocGrantResponse
+from .signing import public_key_to_jwk, sign_grant
+from .storage import (
+    ensure_issuer_key,
+    list_charters,
+    list_known_issuer_keys,
+    load_charter,
+    load_disclosure,
+)
 
 app = FastAPI(title="Charter Service", version="0.1.0")
 
@@ -440,6 +462,350 @@ def get_disclosure(
     if disclosure is None:
         raise HTTPException(status_code=404, detail="disclosure not found")
     return JSONResponse(content=disclosure.model_dump(mode="json"))
+
+
+# ---------------------------------------------------------------------------
+# Step-up protocol (B2.5 — ADR-013)
+#
+# `POST /step-up` is the dual of `propose_within_scope`. The caller asks
+# the issuer for a short-TTL, task-bound signed grant that temporarily
+# widens authority for one specific task. The grant is signed with the
+# same Ed25519 issuer key as the linked Charter (ADR-002), has its own
+# canonical-bytes rule (ADR-003 extension), and has no `revoked`
+# lifecycle state — short TTL is the only safety primitive.
+#
+# Three approval modes, gated by env `CHARTER_STEPUP_APPROVAL_MODE`:
+#   - `auto-deny` (default, production-safe): refuse every request.
+#   - `auto-approve` (dev/test): sign and return immediately.
+#   - `callback`: synchronously POST the request to
+#     `CHARTER_STEPUP_CALLBACK_URL`; the response shape mirrors
+#     `AdHocGrantResponse` and decides outcome.
+#
+# Rate limit: `(principal_id, agent_id)` -> ≤5 requests / 60s (in-memory
+# token bucket; single-process by design — multi-instance is future).
+# ---------------------------------------------------------------------------
+
+
+_STEPUP_DEFAULT_MAX_TTL = 3600
+_STEPUP_RATE_WINDOW_SEC = 60.0
+_STEPUP_RATE_MAX = 5
+
+# In-memory rate-limit state. Key: (principal_id, agent_id) -> deque of
+# monotonic timestamps. Guarded by `_stepup_rate_lock` so concurrent
+# requests on the same key cannot both pass the bucket check.
+_stepup_rate_lock = threading.Lock()
+_stepup_rate_state: dict[tuple[str, str], deque[float]] = {}
+
+
+def _stepup_max_ttl() -> int:
+    """Resolve the max TTL cap (`CHARTER_STEPUP_MAX_TTL`, default 3600s).
+
+    Non-numeric / non-positive values silently fall back to the default
+    — operator-friendly, since this is a safety cap, not a request param.
+    """
+    raw = os.environ.get("CHARTER_STEPUP_MAX_TTL", "").strip()
+    if not raw:
+        return _STEPUP_DEFAULT_MAX_TTL
+    try:
+        ttl = int(raw)
+    except ValueError:
+        return _STEPUP_DEFAULT_MAX_TTL
+    return ttl if ttl > 0 else _STEPUP_DEFAULT_MAX_TTL
+
+
+def _stepup_approval_mode() -> str:
+    """Resolve approval mode env. Defaults to `auto-deny` (production-safe).
+
+    Unknown values fall back to `auto-deny` — the safest default for a
+    misconfigured deployment. (A noisy value silently widening to
+    auto-approve would be a security footgun.)
+    """
+    raw = os.environ.get("CHARTER_STEPUP_APPROVAL_MODE", "").strip().lower()
+    if raw in ("auto-approve", "auto-deny", "callback"):
+        return raw
+    return "auto-deny"
+
+
+def _stepup_check_rate_limit(principal_id: str, agent_id: str) -> bool:
+    """Return True iff the (principal_id, agent_id) is allowed another request.
+
+    Token bucket: at most `_STEPUP_RATE_MAX` requests per principal_id +
+    agent_id pair within the trailing `_STEPUP_RATE_WINDOW_SEC` window.
+    Allowing requests records the timestamp; failing requests do NOT
+    consume a slot (only successful checks do).
+
+    This is a single-process bucket — `fly.io` multi-instance deployments
+    will see independent buckets per instance until a backing store
+    (Redis / fly-replay) lands (future work).
+    """
+    now = time.monotonic()
+    cutoff = now - _STEPUP_RATE_WINDOW_SEC
+    key = (principal_id, agent_id)
+    with _stepup_rate_lock:
+        bucket = _stepup_rate_state.setdefault(key, deque())
+        # Drop expired timestamps from the LEFT (oldest first).
+        while bucket and bucket[0] <= cutoff:
+            bucket.popleft()
+        if len(bucket) >= _STEPUP_RATE_MAX:
+            return False
+        bucket.append(now)
+        return True
+
+
+def _stepup_reset_rate_limit() -> None:
+    """Test-only: clear the in-memory rate bucket.
+
+    Exposed so test cases can reset the bucket between scenarios without
+    monkeypatching module-level state. NOT called by production code
+    paths (the bucket is intentionally process-lived).
+    """
+    with _stepup_rate_lock:
+        _stepup_rate_state.clear()
+
+
+def _stepup_validate_charter_url(url: str) -> str:
+    """Light validation of the charter_url argument. Returns the trimmed URL.
+
+    Empty / whitespace-only URLs raise `HTTPException(400)`. Anything
+    else passes through — fetch-time errors (`CharterNotFoundError` /
+    `CharterSchemaError`) surface from `_fetch_and_verify` and become
+    400s upstream.
+    """
+    if not isinstance(url, str):
+        raise HTTPException(status_code=400, detail="charter_url must be a string")
+    trimmed = url.strip()
+    if not trimmed:
+        raise HTTPException(status_code=400, detail="charter_url must be non-empty")
+    return trimmed
+
+
+def _stepup_build_grant(
+    *,
+    request_body: AdHocGrantRequest,
+    issuer_kid: str,
+) -> AdHocGrant:
+    """Build an unsigned AdHocGrant from a validated request.
+
+    `grant_id` is a fresh UUID v4. `granted_at` is now (UTC, microsecond
+    cleared for determinism). `expires_at = granted_at + max_ttl_seconds`.
+    """
+    now = datetime.now(UTC).replace(microsecond=0)
+    return AdHocGrant(
+        grant_id=uuid.uuid4().hex,
+        charter_url=request_body.charter_url,
+        task=request_body.task,
+        justification=request_body.justification,
+        granted_at=now,
+        expires_at=now + timedelta(seconds=request_body.max_ttl_seconds),
+        issuer_kid=issuer_kid,
+    )
+
+
+def _stepup_callback_response(req: AdHocGrantRequest) -> AdHocGrantResponse:
+    """Synchronously POST the request to `CHARTER_STEPUP_CALLBACK_URL`.
+
+    The callback target is expected to return JSON matching
+    `AdHocGrantResponse`. Failures (URL unset, network error, schema
+    mismatch) collapse to a denied response with `denial_reason`
+    describing the failure mode so the caller can diagnose without
+    seeing a 500. This is a deliberate fail-closed choice: a misbehaving
+    callback target should NEVER widen authority.
+
+    The callback target is responsible for any approval UI (Slack / web
+    form / etc.); this server only routes the request and trusts the
+    callback's signed response by reference.
+    """
+    url = os.environ.get("CHARTER_STEPUP_CALLBACK_URL", "").strip()
+    if not url:
+        return AdHocGrantResponse(
+            status="denied",
+            grant=None,
+            denial_reason=("approval mode is callback but CHARTER_STEPUP_CALLBACK_URL is not set"),
+        )
+    try:
+        resp = httpx.post(url, json=req.model_dump(mode="json"), timeout=10.0)
+        resp.raise_for_status()
+        return AdHocGrantResponse.model_validate(resp.json())
+    except Exception as e:
+        return AdHocGrantResponse(
+            status="denied",
+            grant=None,
+            denial_reason=f"callback failed: {type(e).__name__}: {e}",
+        )
+
+
+@app.post("/step-up", response_model=AdHocGrantResponse)
+def step_up(request_body: AdHocGrantRequest) -> AdHocGrantResponse:
+    """Request a short-TTL AdHocGrant that widens authority for one task.
+
+    Validation order:
+
+      1. Validate `charter_url` (non-empty string).
+      2. Cap `max_ttl_seconds` at `CHARTER_STEPUP_MAX_TTL` (env, default
+         3600s). Higher values return 400.
+      3. Fetch + verify the Charter (404 / signature failures bubble
+         up as 400 — the caller asked for a grant on a Charter we
+         cannot verify, so it is unauthorisable).
+      4. Apply rate limit (`(principal_id, agent_id)` -> 5 / 60s). 6th
+         attempt within window returns 429.
+      5. Dispatch to approval mode (`auto-deny` / `auto-approve` /
+         `callback`).
+      6. On approval: build, sign, persist the grant. Return
+         `AdHocGrantResponse{status="approved", grant=<...>}`.
+
+    The grant is signed with the issuer's private key, which is loaded
+    from `data/keys/<principal_id>.pem` via `ensure_issuer_key`. This
+    is the same key the Charter was signed with — ADR-002 (Ed25519
+    only) extends to grants.
+    """
+    # 1 + 2: validate inputs.
+    charter_url = _stepup_validate_charter_url(request_body.charter_url)
+    cap = _stepup_max_ttl()
+    if request_body.max_ttl_seconds > cap:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"max_ttl_seconds={request_body.max_ttl_seconds} exceeds server cap "
+                f"CHARTER_STEPUP_MAX_TTL={cap}"
+            ),
+        )
+
+    # 3: fetch + verify Charter. Imported lazily to dodge the cyclical
+    # mcp_server -> server import order at module load.
+    from .mcp_server import _fetch_and_verify
+
+    try:
+        charter = _fetch_and_verify(charter_url)
+    except CharterError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"charter_url could not be verified: {type(e).__name__}: {e}",
+        ) from e
+
+    # 4: rate limit on the verified binding.
+    principal_id = charter.binding.principal_id
+    agent_id = charter.binding.agent_id
+    if not _stepup_check_rate_limit(principal_id, agent_id):
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"step-up rate limit exceeded for ({principal_id!r}, {agent_id!r}): "
+                f"max {_STEPUP_RATE_MAX} per {_STEPUP_RATE_WINDOW_SEC:.0f}s"
+            ),
+        )
+
+    # 5: dispatch on approval mode. `auto-deny` short-circuits BEFORE
+    # we touch the key store — production-safe default.
+    mode = _stepup_approval_mode()
+    if mode == "auto-deny":
+        return AdHocGrantResponse(
+            status="denied",
+            grant=None,
+            denial_reason="approval mode is auto-deny",
+        )
+
+    if mode == "callback":
+        # Build a request payload AFTER capping the TTL so the callback
+        # target sees the value we will actually sign on approval.
+        capped_request = AdHocGrantRequest(
+            charter_url=charter_url,
+            task=request_body.task,
+            justification=request_body.justification,
+            max_ttl_seconds=request_body.max_ttl_seconds,
+        )
+        cb_response = _stepup_callback_response(capped_request)
+        if cb_response.status != "approved":
+            return cb_response
+        # Callback approved — fall through to the signing path. If the
+        # callback handed us a pre-built grant, we use it; otherwise we
+        # build one ourselves.
+        if cb_response.grant is not None:
+            return cb_response
+        # No grant supplied; treat as a green-light to mint one.
+
+    # mode == "auto-approve" OR callback approved-with-no-grant.
+    issuer_kid = charter.provenance.issuer_kid or ""
+    if not issuer_kid:
+        # Legacy Charter with no kid — refuse rather than mint a grant
+        # we cannot route to a JWKS entry. This protects pre-v0.8
+        # Charters from accidentally getting step-up grants tied to no
+        # discoverable key.
+        return AdHocGrantResponse(
+            status="denied",
+            grant=None,
+            denial_reason="Charter has no issuer_kid; cannot mint step-up grant",
+        )
+    grant = _stepup_build_grant(request_body=request_body, issuer_kid=issuer_kid)
+    private_key = ensure_issuer_key(principal_id)
+    sign_grant(grant, private_key)
+    _save_grant(grant)
+    return AdHocGrantResponse(status="approved", grant=grant, denial_reason=None)
+
+
+@app.get("/grants/{grant_id}")
+def get_grant(grant_id: str) -> JSONResponse:
+    """Return a stored AdHocGrant as JSON.
+
+    Failure modes:
+      404 — grant does not exist OR signature did not verify (we collapse
+            these into one status code so an attacker probing grant_ids
+            cannot tell "valid id, missing" from "invalid signature").
+      410 — grant exists and signature is valid but `expires_at` is in
+            the past. The 410 is a Gone-not-coming-back signal: by
+            design step-up grants are not renewed (callers must
+            `request_step_up` again to get a fresh one).
+
+    To verify the signature we need the issuer's public key. The
+    canonical source of truth is the Charter's
+    `provenance.issuer_public_key`. We fetch the Charter via
+    `_fetch_and_verify`, which applies the full JWKS / pin /
+    lifecycle pipeline — if the underlying Charter is broken or
+    revoked we can no longer prove the grant's authenticity, so we
+    return 404 (treat as not-a-valid-grant). Charter expiry / revoke
+    do NOT directly invalidate live grants, but they DO mean we have
+    no key to verify the grant against, so the surface behaviour is
+    the same: 404.
+    """
+    # We need the issuer key. Read the grant's charter_url to fetch
+    # the Charter so we can pull its public key. The grant is loaded
+    # first (without verifying signature) only to read charter_url —
+    # then we re-load WITH verification once we have the key.
+    from .mcp_server import _fetch_and_verify
+
+    try:
+        path = _grant_path_for_id(grant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail="grant not found") from e
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="grant not found")
+    raw = AdHocGrant.model_validate_json(path.read_text(encoding="utf-8"))
+
+    try:
+        charter = _fetch_and_verify(raw.charter_url)
+    except CharterError:
+        # We cannot prove authenticity without the Charter; treat
+        # identically to "grant not found".
+        raise HTTPException(status_code=404, detail="grant not found") from None
+
+    try:
+        grant = _load_grant(grant_id, charter.provenance.issuer_public_key)
+    except CharterGrantNotFoundError as e:
+        raise HTTPException(status_code=404, detail="grant not found") from e
+    except CharterGrantSignatureError as e:
+        # Surface as 404 — same reason as the comment above.
+        raise HTTPException(status_code=404, detail="grant not found") from e
+    except CharterGrantExpiredError as e:
+        raise HTTPException(status_code=410, detail="grant expired") from e
+
+    return JSONResponse(content=grant.model_dump(mode="json"))
+
+
+def _grant_path_for_id(grant_id: str) -> Path:
+    """Indirection so the server module does not import grants.grant_path
+    at top level (avoiding a cycle if other modules import server)."""
+    from .grants import grant_path
+
+    return grant_path(grant_id)
 
 
 # ---------------------------------------------------------------------------

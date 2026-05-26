@@ -73,19 +73,28 @@ from collections.abc import Callable
 from typing import Any, cast
 
 from .._logging import get_logger
-from ..errors import CharterError
+from ..errors import (
+    CharterError,
+    CharterGrantExpiredError,
+    CharterGrantNotFoundError,
+    CharterGrantSignatureError,
+)
+from ..grants import load_grant as _load_grant
 from ..mcp_server import (
     _fetch_and_verify,
 )
 from ..mcp_server import (
     aggregate_verdict as _aggregate_verdict_tool,
 )
-from ..schema import AP2VerifyResult, Charter, Verdict
+from ..schema import AdHocGrant, AP2VerifyResult, Charter, Verdict
 
 _log = get_logger("charter.adapters.ap2")
 
 FetchCharterFn = Callable[[str], Charter]
 HitsGrader = Callable[[Charter, str], list[dict[str, Any]]]
+# Loader signature: (grant_id, issuer_public_key_str) -> AdHocGrant.
+# Raises one of the CharterGrant* errors on missing / expired / tampered grant.
+GrantLoaderFn = Callable[[str, str], AdHocGrant]
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +160,42 @@ def _extract_charter_url(mandate: dict[str, Any]) -> str | None:
     if isinstance(url, str) and url:
         return url
     return None
+
+
+def _extract_grant_id(mandate: dict[str, Any]) -> str | None:
+    """Pull `extensions.ad_hoc_grant_id` from the mandate, if present.
+
+    Returns None when the field is absent, empty, or not a string. Treats
+    "not present" identically to "explicitly empty" — both mean the
+    mandate is making no step-up claim.
+    """
+    extensions = mandate.get("extensions")
+    if not isinstance(extensions, dict):
+        return None
+    gid = extensions.get("ad_hoc_grant_id")
+    if isinstance(gid, str) and gid:
+        return gid
+    return None
+
+
+def _grant_covers_task(grant: AdHocGrant, task: str) -> bool:
+    """Decide whether a grant's task description covers the mandate's task.
+
+    v0.9 ships the conservative literal-equality rule: the grant covers
+    the task iff `grant.task` equals the mandate's task string (after
+    trim). Future iterations may add a semantic LLM grader; the
+    architecture for that is intentionally left out of scope here so
+    grant -> mandate matching stays deterministic and audit-friendly.
+
+    Returns True iff:
+      - both strings are non-empty after `strip()`, AND
+      - they are equal under `strip()`.
+    """
+    a = (grant.task or "").strip()
+    b = (task or "").strip()
+    if not a or not b:
+        return False
+    return a == b
 
 
 def _extract_task(mandate: dict[str, Any]) -> str:
@@ -244,11 +289,21 @@ def embed_charter_in_mandate(mandate: dict[str, Any], charter_url: str) -> dict[
     return new_mandate
 
 
+def _default_grant_loader(grant_id: str, issuer_public_key_str: str) -> AdHocGrant:
+    """Default grant loader: delegate to `charter.grants.load_grant`.
+
+    Hosts can swap in their own loader (e.g. caching or remote) by
+    passing `grant_loader_fn=` to `verify`.
+    """
+    return _load_grant(grant_id, issuer_public_key_str)
+
+
 def verify(
     mandate: dict[str, Any],
     *,
     fetch_charter_fn: FetchCharterFn = _default_fetch_charter,
     hits_grader: HitsGrader | None = None,
+    grant_loader_fn: GrantLoaderFn = _default_grant_loader,
 ) -> AP2VerifyResult:
     """Verify an AP2 mandate AND its embedded Charter, collapse to one result.
 
@@ -373,6 +428,56 @@ def verify(
     hits = grader(charter, task)
     charter_verdict = _call_aggregate_verdict(charter, hits)
 
+    # Step-up grant escalation (B2.5 — ADR-013):
+    # If the mandate carries `extensions.ad_hoc_grant_id`, attempt to
+    # promote a Charter verdict of `incompatible` / `needs_approval`
+    # up to `allow` IFF (a) the grant loads + verifies + is unexpired
+    # AND (b) the grant's task covers the mandate's task. A failed
+    # grant (missing / expired / tampered / task mismatch) leaves
+    # the Charter verdict UNCHANGED so the existing decision rules
+    # apply — failing-open would defeat the safety of the protocol.
+    grant_id = _extract_grant_id(mandate)
+    grant_outcome: str = "absent"
+    if grant_id is not None:
+        try:
+            grant = grant_loader_fn(grant_id, charter.provenance.issuer_public_key)
+        except CharterGrantExpiredError:
+            grant_outcome = "expired"
+        except (CharterGrantNotFoundError, CharterGrantSignatureError):
+            grant_outcome = "invalid"
+        except Exception as e:
+            # Defensive: a caller-supplied loader may raise unexpected
+            # exceptions; treat as invalid grant so we cannot fail-open.
+            _log.warning(
+                "ap2 verify: grant loader raised unexpected exception",
+                extra={
+                    "grant_id": grant_id,
+                    "error": f"{type(e).__name__}: {e}",
+                    "outcome": "grant_loader_error",
+                },
+            )
+            grant_outcome = "invalid"
+        else:
+            if _grant_covers_task(grant, task):
+                grant_outcome = "covers"
+                if charter_verdict.decision != "allow":
+                    # Promote to allow. Synthesize a new Verdict that
+                    # records the override in `reason` so the audit
+                    # trail still surfaces both the original Charter
+                    # decision and the grant that overrode it.
+                    charter_verdict = Verdict(
+                        decision="allow",
+                        matched_clauses=charter_verdict.matched_clauses,
+                        reason=(
+                            f"AdHocGrant {grant.grant_id!r} covers task; promoting "
+                            f"Charter verdict (was {charter_verdict.decision!r}: "
+                            f"{charter_verdict.reason}) to allow."
+                        ),
+                        rewrite_available=False,
+                    )
+            else:
+                grant_outcome = "task_mismatch"
+
     final, reason = _decide(True, charter_verdict)
     _log.info(
         "ap2 verify complete",
@@ -383,6 +488,7 @@ def verify(
             "agent_id": charter.binding.agent_id,
             "charter_decision": charter_verdict.decision,
             "final_decision": final,
+            "grant_outcome": grant_outcome,
         },
     )
     return AP2VerifyResult(
@@ -396,6 +502,7 @@ def verify(
 __all__ = [
     "FetchCharterFn",
     "HitsGrader",
+    "GrantLoaderFn",
     "embed_charter_in_mandate",
     "verify",
 ]

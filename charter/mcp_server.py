@@ -1143,6 +1143,88 @@ def _chain_failure(reason: str, walked_leaf_first: list[Charter]) -> dict[str, A
 
 
 # ---------------------------------------------------------------------------
+# Tool 12: request_step_up (B2.5 — HTTP forward only, no LLM)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def request_step_up(
+    charter_url: str,
+    task: str,
+    justification: str,
+    max_ttl_seconds: int = 300,
+) -> dict[str, Any]:
+    """Request a short-TTL AdHocGrant to widen authority for one task.
+
+    The dual of `propose_within_scope`. Use this when the caller is
+    confident the task MUST happen even though the Charter says it is
+    out-of-scope or needs_approval — the caller submits the task and a
+    justification, and the issuer's `POST /step-up` endpoint decides
+    whether to mint a signed grant.
+
+    **This tool MAY require human-in-the-loop approval depending on
+    issuer policy.** The reference server's three modes are:
+      - `auto-deny` (default): always returns `denied`.
+      - `auto-approve`: signs and returns immediately.
+      - `callback`: forwards to an external system (Slack / email /
+        approval UI) and echoes the response.
+
+    Per ADR-009, this MCP tool itself does NOT call an LLM. It only
+    HTTP-forwards to the server-side `/step-up` endpoint, which then
+    applies the configured approval policy.
+
+    The server URL is composed from `CHARTER_URL_BASE` (or the env
+    default), so a calling agent does not need to know the issuer's
+    host beyond what the Charter already exposes.
+
+    Args:
+        charter_url:     URL of the Charter the grant attaches to.
+        task:            Natural-language task description.
+        justification:   Reason the principal should approve. Shown to
+                         the human approver in callback mode.
+        max_ttl_seconds: Requested TTL. Server caps at
+                         `CHARTER_STEPUP_MAX_TTL` (default 3600).
+
+    Returns:
+        AdHocGrantResponse JSON: `{status, grant?, denial_reason?}`.
+        Network failures surface as `{ok: false, reason: ...}` so the
+        caller can distinguish "issuer denied" from "could not reach
+        issuer".
+    """
+    base = os.environ.get("CHARTER_URL_BASE", DEFAULT_URL_BASE).rstrip("/")
+    endpoint = f"{base}/step-up"
+    body = {
+        "charter_url": charter_url,
+        "task": task,
+        "justification": justification,
+        "max_ttl_seconds": max_ttl_seconds,
+    }
+    try:
+        resp = httpx.post(endpoint, json=body, timeout=15.0)
+    except httpx.RequestError as e:
+        return {"ok": False, "reason": f"could not reach {endpoint}: {e}"}
+
+    if resp.status_code >= 400:
+        # Surface server-side validation / rate-limit errors verbatim
+        # so the calling agent can decide whether to retry.
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = {"detail": resp.text}
+        return {
+            "ok": False,
+            "reason": f"HTTP {resp.status_code}",
+            "detail": detail,
+        }
+
+    try:
+        payload: dict[str, Any] = resp.json()
+    except Exception as e:
+        return {"ok": False, "reason": f"server returned non-JSON body: {e}"}
+    return payload
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

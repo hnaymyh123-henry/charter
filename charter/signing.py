@@ -45,7 +45,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 from ._logging import get_logger
-from .schema import Charter
+from .schema import AdHocGrant, Charter
 
 _log = get_logger("charter.signing")
 
@@ -301,6 +301,66 @@ def verify_charter(charter: Charter) -> bool:
         signature = base64.b64decode(sig_str.removeprefix("ed25519:"))
         public_key = public_key_from_string(charter.provenance.issuer_public_key)
         payload = _canonical_bytes(charter)
+        public_key.verify(signature, payload)
+        return True
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# AdHocGrant signing (B2.5 — step-up protocol, ADR-013)
+# ---------------------------------------------------------------------------
+
+
+def _canonical_grant_bytes(grant: AdHocGrant) -> bytes:
+    """Serialize an AdHocGrant for signing.
+
+    Same canonical-bytes rule as Charter (ADR-003): sorted keys, no
+    whitespace, `issuer_signature` cleared to break the self-reference.
+    The grant does NOT have a `transparency_log_id` field — step-up
+    grants are intentionally not transparency-logged in v0.9 (per
+    ADR-013 future-work note).
+    """
+    payload = grant.model_dump(mode="json")
+    payload["issuer_signature"] = ""
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+
+
+def sign_grant(grant: AdHocGrant, private_key: Ed25519PrivateKey) -> AdHocGrant:
+    """Sign an AdHocGrant in place and return it.
+
+    The caller is responsible for setting `issuer_kid` to the same value
+    as the underlying Charter's `provenance.issuer_kid` before signing —
+    a verifier matches the grant to a Charter's issuer key via this kid.
+
+    No transparency log append (deliberate v0.9 scope: step-up grants
+    are not transparency-logged; see ADR-013).
+    """
+    payload = _canonical_grant_bytes(grant)
+    signature = private_key.sign(payload)
+    grant.issuer_signature = f"ed25519:{base64.b64encode(signature).decode('ascii')}"
+    return grant
+
+
+def verify_grant_signature(grant: AdHocGrant, issuer_public_key_str: str) -> bool:
+    """Verify a grant's signature against the issuer's public key.
+
+    The issuer key must be supplied by the caller (typically fetched
+    from the linked Charter's `provenance.issuer_public_key`). The
+    grant itself does NOT embed its own issuer public key — the link
+    to the Charter is the trust root.
+
+    Returns True iff the signature is well-formed AND verifies. Does
+    NOT check `expires_at` lifecycle (callers do that separately so
+    they can produce different error types per failure mode).
+    """
+    sig_str = grant.issuer_signature
+    if not sig_str.startswith("ed25519:"):
+        return False
+    try:
+        signature = base64.b64decode(sig_str.removeprefix("ed25519:"))
+        public_key = public_key_from_string(issuer_public_key_str)
+        payload = _canonical_grant_bytes(grant)
         public_key.verify(signature, payload)
         return True
     except Exception:
