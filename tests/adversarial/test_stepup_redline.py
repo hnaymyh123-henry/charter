@@ -127,6 +127,66 @@ def test_exfil_is_incompatible_and_ungrantable_end_to_end(isolated: Path) -> Non
     assert "red line" in out["reason"].lower()
 
 
+def test_forged_charter_dict_is_overridden_by_verified_fetch(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Defense-in-depth (C): a caller cannot smuggle a forged charter past apply_grant.
+
+    Attack: relabel the out_of_scope clause (C-101) as approval_required so it
+    *looks* grantable, mint a grant covering it, and present the forged dict.
+    Against the forged dict alone the grant would downgrade to allow — so when
+    charter_url resolves to the principal's endpoint, apply_grant MUST judge
+    against the fetched, signature-verified canonical charter (where C-101 is
+    still out_of_scope) and keep the result incompatible.
+    """
+    import charter.mcp_server as ms
+
+    real = _comms_charter()  # C-101 is out_of_scope (the hard limit)
+    forged = _comms_charter()
+    for c in forged["clauses"]:  # relabel the hard limit as a grantable clause
+        if c["id"] == "C-101":
+            c["type"] = "approval_required"
+
+    class _Fetched:
+        def model_dump(self, mode: str | None = None) -> dict[str, Any]:
+            return real
+
+    # Simulate "the endpoint served the real charter and it verified".
+    monkeypatch.setattr(ms, "_fetch_and_verify", lambda _url: _Fetched())
+
+    private, pub = _keypair()
+    # Strongest forged input: a grant minted against the FORGED charter that
+    # covers C-101 (validate_grant_targets accepts it there since it's typed
+    # approval_required). Against the forged dict this would yield allow.
+    grant = issue_grant(
+        charter=forged,
+        charter_url=CHARTER_URL,
+        task_id="t-forge",
+        relaxes_clause_ids=["C-101"],
+        private_key=private,
+        issuer_public_key=pub,
+        reason="(attacker-supplied, forged charter)",
+    )
+    hits = [
+        {"id": "C-101", "hit": True, "confidence": 0.97,
+         "reason": "Exfiltrates client tax data to an external address."}
+    ]
+
+    out = call_mcp_tool(
+        apply_grant_tool,
+        forged,                   # caller passes the FORGED dict ...
+        hits,
+        grant.model_dump(mode="json"),
+        charter_url=CHARTER_URL,  # ... but charter_url resolves to the REAL charter
+        task_id="t-forge",
+    )
+
+    # Judged against the fetched real charter: C-101 stays out_of_scope ->
+    # incompatible -> red line holds despite the forged dict + valid grant.
+    assert out["effective_decision"] == "incompatible"
+    assert out["granted"] is False
+
+
 def test_cannot_even_mint_grant_for_out_of_scope_clause() -> None:
     """validate_grant_targets (via issue_grant) refuses to build a grant that
     targets the out_of_scope clause directly."""

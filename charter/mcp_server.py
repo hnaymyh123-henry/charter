@@ -1341,6 +1341,10 @@ def apply_grant(
          `incompatible` clause.
 
     RED LINES enforced here:
+      - Charter authenticity: when `charter_url` is reachable, the base verdict
+        is computed against the signature-verified charter fetched from it (not
+        the caller-supplied dict), so a forged/relabelled charter cannot
+        downgrade a hard limit on the production path.
       - If the recomputed base decision is `incompatible`, `effective_decision`
         stays `incompatible` regardless of the grant.
       - If any `needs_approval` clause is not covered by the grant,
@@ -1363,6 +1367,25 @@ def apply_grant(
     """
     from .schema import Verdict
     from .stepup import AdHocGrant, GrantCheck, apply_grant_to_verdict, verify_grant
+
+    # 0. SECURITY (defense-in-depth): never judge a grant against an unverified
+    #    charter when we can avoid it. If `charter_url` resolves to the
+    #    principal's live endpoint, fetch the signature-verified canonical copy
+    #    and judge against THAT — not the caller-supplied dict. Parity with
+    #    `request_step_up`. This blocks a forged/relabelled charter (e.g. an
+    #    out_of_scope clause re-typed as approval_required) from turning a hard
+    #    limit into a grantable needs_approval on the production path (the
+    #    orchestrator always passes a live charter_url). When the endpoint is
+    #    unreachable (offline / unit callers), fall back to the supplied dict —
+    #    the same caller-supplied-data contract as `aggregate_verdict` — and
+    #    record that the charter was NOT verified so the audit trail stays honest.
+    charter_verified = False
+    if charter_url:
+        try:
+            charter = _fetch_and_verify(charter_url).model_dump(mode="json")
+            charter_verified = True
+        except Exception:
+            charter_verified = False
 
     # 1. Recompute the base verdict via the FROZEN aggregator. No grant input.
     #    `aggregate_verdict` may be a bare function or a FastMCP-wrapped tool
@@ -1430,6 +1453,7 @@ def apply_grant(
             "effective_decision": gv.effective_decision,
             "base_decision": base_verdict.decision,
             "grant_check": check.reason,
+            "charter_verified": charter_verified,
         },
     )
     return gv.model_dump(mode="json")
