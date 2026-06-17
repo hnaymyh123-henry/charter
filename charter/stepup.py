@@ -346,13 +346,17 @@ def verify_grant(
     now: datetime | None = None,
     recipients: list[str] | None = None,
     budget_usd: float | None = None,
+    principal_public_key: str | None = None,
 ) -> GrantCheck:
     """Validate a grant against the context it is being presented in.
 
     Fail-closed: returns ``GrantCheck(ok=False, ...)`` on the FIRST failing
     check. Checks, in order:
 
-      1. Signature verifies against the embedded principal public key.
+      1. Signature verifies against the embedded public key, AND — when
+         ``principal_public_key`` is supplied — that embedded key equals the
+         charter's principal key, so a self-signed grant from a non-principal is
+         rejected (not just a tampered signature).
       2. ``grant.charter_id`` matches the charter being gated (revision pin).
       3. ``grant.charter_url`` matches ``charter_url`` (exact-match binding).
       4. ``grant.task_id`` matches ``task_id`` (single task this authorizes).
@@ -370,6 +374,22 @@ def verify_grant(
 
     if not verify_grant_signature(grant):
         return GrantCheck(ok=False, reason="grant signature did not verify")
+
+    # Authority binding: the grant must be signed by the SAME principal key that
+    # signed the charter — not merely by a self-consistent keypair. Without this,
+    # anyone could self-sign a grant and forge "the principal approved this".
+    # Enforced only when the caller supplies the (verified) principal key.
+    if (
+        principal_public_key is not None
+        and grant.provenance.issuer_public_key != principal_public_key
+    ):
+        return GrantCheck(
+            ok=False,
+            reason=(
+                "grant issuer key does not match the charter's principal key — "
+                "only the principal that signed the charter may authorize a waiver"
+            ),
+        )
 
     charter_id = charter.get("charter_id")
     if grant.charter_id != charter_id:

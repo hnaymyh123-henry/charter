@@ -187,6 +187,54 @@ def test_forged_charter_dict_is_overridden_by_verified_fetch(
     assert out["granted"] is False
 
 
+def test_self_signed_grant_by_non_principal_is_rejected(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Authority binding (gap #2): a grant must be signed by the charter's principal.
+
+    A stranger self-signs a grant (valid, self-consistent signature, but with
+    THEIR own key) covering a real needs_approval clause. Without binding the
+    grant's signer to the charter's principal, this would forge "the principal
+    approved" and downgrade to allow. With the binding, apply_grant rejects it
+    on the verified path.
+    """
+    import charter.mcp_server as ms
+
+    _principal_priv, principal_pub = _keypair()
+    real = _comms_charter()
+    # The fetched canonical charter carries the principal's key in provenance.
+    real["provenance"] = {"issuer_public_key": principal_pub}
+
+    class _Fetched:
+        def model_dump(self, mode: str | None = None) -> dict[str, Any]:
+            return real
+
+    monkeypatch.setattr(ms, "_fetch_and_verify", lambda _url: _Fetched())
+
+    # A stranger (NOT the principal) self-signs a grant for a real needs_approval
+    # clause (C-201 = external-send approval).
+    stranger_priv, stranger_pub = _keypair()
+    grant = issue_grant(
+        charter=real,
+        charter_url=CHARTER_URL,
+        task_id="t-self",
+        relaxes_clause_ids=["C-201"],
+        private_key=stranger_priv,
+        issuer_public_key=stranger_pub,
+        reason="(stranger self-signed)",
+    )
+    hits = [{"id": "C-201", "hit": True, "confidence": 0.9, "reason": "external send"}]
+
+    out = call_mcp_tool(
+        apply_grant_tool, real, hits, grant.model_dump(mode="json"),
+        charter_url=CHARTER_URL, task_id="t-self",
+    )
+
+    # Grant not signed by the charter's principal -> rejected -> stays needs_approval.
+    assert out["granted"] is False
+    assert out["effective_decision"] == "needs_approval"
+
+
 def test_cannot_even_mint_grant_for_out_of_scope_clause() -> None:
     """validate_grant_targets (via issue_grant) refuses to build a grant that
     targets the out_of_scope clause directly."""

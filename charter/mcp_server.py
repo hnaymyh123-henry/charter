@@ -1425,7 +1425,16 @@ def apply_grant(
     persisted = _load_grant(grant_obj.grant_id)
     effective_grant = persisted or grant_obj
 
-    # 2. Verify the grant in context.
+    # 2. Verify the grant in context. When we judged against a verified canonical
+    #    charter, also bind the grant's signer to that charter's principal key —
+    #    a self-signed grant from a non-principal is rejected (auditability: the
+    #    claim "the principal approved this" cannot be forged). On the unverified
+    #    fallback path we have no trusted principal key, so this is skipped.
+    principal_pk = (
+        (charter.get("provenance") or {}).get("issuer_public_key")
+        if charter_verified
+        else None
+    )
     check: GrantCheck = verify_grant(
         effective_grant,
         charter=charter,
@@ -1433,6 +1442,7 @@ def apply_grant(
         task_id=task_id or effective_grant.task_id,
         recipients=recipients,
         budget_usd=budget_usd,
+        principal_public_key=principal_pk,
     )
 
     # 3. Apply (pure red-line core).
