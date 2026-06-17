@@ -1143,6 +1143,299 @@ def _chain_failure(reason: str, walked_leaf_first: list[Charter]) -> dict[str, A
 
 
 # ---------------------------------------------------------------------------
+# Step-up negotiation (B2.5) — grant persistence + transparency helpers
+# ---------------------------------------------------------------------------
+#
+# Tools #12 (request_step_up) and #13 (apply_grant) are APPENDED here. They do
+# not edit tools 1-11, constants.py, or the Charter transparency module. Grants
+# persist as signed JSON under data/grants/<grant_id>.json (parallel to
+# data/charters / data/messages), single-use: status active -> consumed on the
+# first successful apply. Every negotiation event is written to an append-only
+# step-up transparency log so the audit trail treats grants as first-class
+# signed objects.
+
+_log_stepup = get_logger("charter.stepup")
+
+
+def _grants_dir() -> Path:
+    path = data_root() / "grants"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _grant_path(grant_id: str) -> Path:
+    # Reuse the storage allowlist sanitizer so a hostile grant_id can't escape
+    # the grants directory (path traversal defense, same as charter_path).
+    from .storage import _safe
+
+    return _grants_dir() / f"{_safe(grant_id)}.json"
+
+
+def _save_grant(grant: AdHocGrantT) -> Path:
+    path = _grant_path(grant.grant_id)
+    path.write_text(grant.model_dump_json(indent=2), encoding="utf-8")
+    return path
+
+
+def _load_grant(grant_id: str) -> AdHocGrantT | None:
+    from .stepup import AdHocGrant
+
+    path = _grant_path(grant_id)
+    if not path.exists():
+        return None
+    try:
+        return AdHocGrant.model_validate_json(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _stepup_log_path() -> Path:
+    env = os.environ.get("CHARTER_STEPUP_LOG", "").strip()
+    if env:
+        return Path(env)
+    tdir = data_root() / "transparency"
+    tdir.mkdir(parents=True, exist_ok=True)
+    return tdir / "stepup.log"
+
+
+def _stepup_log(event: str, payload: dict[str, Any]) -> None:
+    """Append one negotiation event to the step-up transparency log (JSONL).
+
+    The log is the audit trail for the whole negotiation: every step-up
+    request, every grant issuance, and every apply outcome (granted or refused)
+    lands here so an auditor can reconstruct "who asked for what, who approved
+    it, and what the effective decision was." Append-only; one JSON object per
+    line.
+    """
+    entry = {"at": _now_iso(), "event": event, **payload}
+    path = _stepup_log_path()
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+    _log_stepup.info("stepup event", extra={"event": event, "outcome": payload.get("outcome", event)})
+
+
+# A forward-reference alias so the helpers above can be annotated without a
+# hard import at module load (stepup imports schema.Verdict; no cycle, but we
+# keep the import lazy to match the rest of this file's tool-local imports).
+if False:  # pragma: no cover - typing only
+    from .stepup import AdHocGrant as AdHocGrantT  # noqa: F401
+
+
+# ---------------------------------------------------------------------------
+# Tool 12: request_step_up (worker -> principal escalation)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def request_step_up(
+    charter_url: str,
+    intended_task: str,
+    failed_verdict: dict[str, Any],
+    task_id: str = "",
+    justification: str = "",
+) -> dict[str, Any]:
+    """Escalate a needs_approval task to the principal for negotiation.
+
+    Call this ONLY when `aggregate_verdict` returned
+    `decision == "needs_approval"`. The tool builds a `StepUpRequest` that the
+    principal-approval callback can act on (and, if it approves, mint an
+    `AdHocGrant` via the Python API `stepup.issue_grant`).
+
+    RED LINE (structural): if `failed_verdict.decision != "needs_approval"`,
+    this REFUSES with `{ok: false, reason: "step-up only valid for
+    needs_approval; got <decision>"}`. There is no negotiation path out of an
+    `incompatible` (out_of_scope) verdict — a hard limit can never be bypassed
+    by asking nicely.
+
+    Args:
+        charter_url:    The worker charter URL the task was gated against.
+        intended_task:  The original natural-language task.
+        failed_verdict: The Verdict dict returned by `aggregate_verdict`.
+        task_id:        The delegate_task task_id this escalation is about.
+        justification:  Why the principal should consider approving.
+
+    Returns:
+        On valid escalation:
+            {"ok": true, "step_up_request": {<StepUpRequest fields>}}
+        On refusal (not needs_approval):
+            {"ok": false, "reason": "step-up only valid for needs_approval; got <decision>"}
+    """
+    from .schema import Verdict
+    from .stepup import build_step_up_request
+
+    try:
+        verdict = Verdict.model_validate(failed_verdict)
+    except Exception as e:
+        return {"ok": False, "reason": f"failed_verdict is not a valid Verdict: {e}"}
+
+    # Resolve charter_id from the live charter so the request binds to a
+    # concrete revision. Fail-closed if it can't be fetched/verified.
+    try:
+        charter = _fetch_and_verify(charter_url)
+    except Exception as e:
+        return {"ok": False, "reason": f"{type(e).__name__}: {e}"}
+
+    req = build_step_up_request(
+        task_id=task_id,
+        charter_url=charter_url,
+        charter_id=charter.charter_id,
+        intended_task=intended_task,
+        failed_verdict=verdict,
+        justification=justification,
+    )
+
+    if req is None:
+        # RED LINE: refuse to escalate anything that isn't needs_approval.
+        reason = f"step-up only valid for needs_approval; got {verdict.decision}"
+        _stepup_log(
+            "request_refused",
+            {
+                "outcome": "refused",
+                "task_id": task_id,
+                "charter_id": charter.charter_id,
+                "decision": verdict.decision,
+                "reason": reason,
+            },
+        )
+        return {"ok": False, "reason": reason}
+
+    _stepup_log(
+        "request_step_up",
+        {
+            "outcome": "escalated",
+            "task_id": task_id,
+            "charter_id": charter.charter_id,
+            "requested_clause_ids": req.requested_clause_ids,
+        },
+    )
+    return {"ok": True, "step_up_request": req.model_dump(mode="json")}
+
+
+# ---------------------------------------------------------------------------
+# Tool 13: apply_grant (re-gate a task that carries an AdHocGrant)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def apply_grant(
+    charter: dict[str, Any],
+    hits: list[dict[str, Any]],
+    grant: dict[str, Any],
+    charter_url: str = "",
+    task_id: str = "",
+    recipients: list[str] | None = None,
+    budget_usd: float | None = None,
+) -> dict[str, Any]:
+    """Recompute the base verdict, then apply an AdHocGrant to it.
+
+    This is the post-grant re-gate. It:
+
+      1. Recomputes the BASE verdict from scratch via the frozen
+         `aggregate_verdict` (no shortcut — the grant never feeds into the base
+         computation).
+      2. Verifies the grant (`verify_grant`): signature, charter_id +
+         charter_url + task_id binding, lifecycle/expiry, and constraints
+         (recipient allowlist, budget cap).
+      3. Downgrades ONLY matched `needs_approval` clauses listed in
+         `grant.relaxes_clause_ids` — and ONLY if the base verdict has NO
+         `incompatible` clause.
+
+    RED LINES enforced here:
+      - If the recomputed base decision is `incompatible`, `effective_decision`
+        stays `incompatible` regardless of the grant.
+      - If any `needs_approval` clause is not covered by the grant,
+        `effective_decision` stays `needs_approval`.
+      - Single-use: on a successful downgrade the persisted grant is marked
+        `consumed`, so a replay of the same grant against a second task fails
+        `verify_grant` (status != active).
+
+    Args:
+        charter:     The Charter dict (as from fetch_charter()["charter"]).
+        hits:        Per-clause hit judgments (same shape as aggregate_verdict).
+        grant:       The AdHocGrant dict to apply.
+        charter_url: The charter URL the grant is bound to (exact match).
+        task_id:     The task this grant authorizes (single-use binding).
+        recipients:  Concrete recipients of this action (for the allowlist).
+        budget_usd:  Concrete cost of this action (for the budget cap).
+
+    Returns:
+        GrantVerdict dict: {granted, effective_decision, grant_id, verdict, reason}.
+    """
+    from .schema import Verdict
+    from .stepup import AdHocGrant, GrantCheck, apply_grant_to_verdict, verify_grant
+
+    # 1. Recompute the base verdict via the FROZEN aggregator. No grant input.
+    #    `aggregate_verdict` may be a bare function or a FastMCP-wrapped tool
+    #    depending on the SDK version; unwrap defensively, same as the test
+    #    helper `call_mcp_tool`.
+    _agg = aggregate_verdict
+    for _attr in ("fn", "func", "__wrapped__"):
+        if hasattr(_agg, _attr):
+            _agg = getattr(_agg, _attr)
+            break
+    base_raw = _agg(charter, hits)
+    base_verdict = Verdict.model_validate(base_raw)
+
+    # Parse the grant. A malformed grant is treated as "no grant" — fail-closed,
+    # the base verdict simply stands.
+    try:
+        grant_obj: AdHocGrant = AdHocGrant.model_validate(grant)
+    except Exception as e:
+        gv = apply_grant_to_verdict(base_verdict, None, None)
+        _stepup_log(
+            "apply_grant",
+            {
+                "outcome": "bad_grant",
+                "task_id": task_id,
+                "charter_id": charter.get("charter_id"),
+                "effective_decision": gv.effective_decision,
+                "reason": f"unparseable grant: {e}",
+            },
+        )
+        out = gv.model_dump(mode="json")
+        out["reason"] = f"unparseable grant: {e}"
+        return out
+
+    # Prefer the persisted copy if one exists — it is the source of truth for
+    # single-use status (a presented grant dict could claim status='active'
+    # even after it was consumed). Fall back to the presented grant otherwise.
+    persisted = _load_grant(grant_obj.grant_id)
+    effective_grant = persisted or grant_obj
+
+    # 2. Verify the grant in context.
+    check: GrantCheck = verify_grant(
+        effective_grant,
+        charter=charter,
+        charter_url=charter_url or effective_grant.charter_url,
+        task_id=task_id or effective_grant.task_id,
+        recipients=recipients,
+        budget_usd=budget_usd,
+    )
+
+    # 3. Apply (pure red-line core).
+    gv = apply_grant_to_verdict(base_verdict, effective_grant, check)
+
+    # Single-use: mark the grant consumed ONLY on a successful downgrade.
+    if gv.granted:
+        effective_grant.lifecycle.status = "consumed"
+        _save_grant(effective_grant)
+
+    _stepup_log(
+        "apply_grant",
+        {
+            "outcome": "granted" if gv.granted else "not_granted",
+            "task_id": task_id,
+            "charter_id": charter.get("charter_id"),
+            "grant_id": effective_grant.grant_id,
+            "effective_decision": gv.effective_decision,
+            "base_decision": base_verdict.decision,
+            "grant_check": check.reason,
+        },
+    )
+    return gv.model_dump(mode="json")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

@@ -113,3 +113,12 @@
 - **决策(2026-05-22)**:adapter 路线只投 OpenAI Agents SDK(已 ship v0.7)和 Anthropic SDK / Claude Agent SDK(deferred,低优先);**不**投 LangGraph 和 CrewAI
 - **背景**:用户判断 LangGraph / CrewAI 已过采用峰值,model-vendor SDK 才是当前生态主流
 - **影响**:新 adapter PR 若是 LangGraph / CrewAI 方向需先得到 PM 重新评估
+
+---
+
+## ADR-013 — Step-up 协商 & AdHocGrant(B2.5 提交期核心新功能)
+
+- **决策(2026-06,提交期)**:新增 `charter/stepup.py`(`AdHocGrant` + `StepUpRequest` + `GrantVerdict` + sign/verify/apply),以及 mcp_server 追加 tool #12 `request_step_up` / #13 `apply_grant`。完整设计见 [`adr/ADR-013-stepup-negotiation.md`](adr/ADR-013-stepup-negotiation.md)
+- **背景**:`needs_approval` 在运行时是死路;B2.5 让 worker 可向 principal 协商,principal 签发限定单次/收件人/范围/时长/预算的临时授权
+- **红线(三层强制)**:① 构造期 `validate_grant_targets` 拒绝非 needs_approval clause;② 升级期 `request_step_up` 仅对 needs_approval 放行;③ apply 期先重算 base verdict,`incompatible` 短路不可降级。grant 复用 Ed25519 签名,single-use(active→consumed),全程进 step-up transparency log
+- **影响**:`AdHocGrant` 只能把 needs_approval→allow,**结构上无法**触碰 `incompatible`/revoked/验签失败;不改 `constants.py` / `aggregate_verdict` / `Verdict` 形状;`tests/adversarial/test_stepup_redline.py` 为 merge-gating 必过
