@@ -46,6 +46,11 @@ dev = [
 openai_agents = [
     "openai-agents>=0.2",
 ]
+# `pip install charter[qwen]` to use the `charter.adapters.qwen` integration
+# (Qwen on Alibaba Cloud DashScope via its OpenAI-compatible endpoint).
+qwen = [
+    "openai>=1.40",
+]
 # `pip install charter[observability]` to wire Charter into your
 # OpenTelemetry pipeline (Datadog, Honeycomb, Tempo, Jaeger, Grafana
 # Cloud, ...). Without this extra installed, every span helper in
