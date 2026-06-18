@@ -786,6 +786,12 @@ def _envelope_with(
     """
     return {
         **envelope,
+        # delegate_task's result does NOT echo the task text back, so inject the
+        # step's intended_task here: the generative worker grades the action it
+        # derives from THIS field. Without it the worker sees an empty task,
+        # grades zero clause hits, and every step falls to the closed-world
+        # needs_approval default — which silently breaks the whole run.
+        "intended_task": step.intended_task,
         "step_id": step.step_id,
         "depends_on": list(getattr(step, "depends_on", []) or []),
         "context": dict(getattr(step, "context", {}) or {}),

@@ -5,9 +5,9 @@
 # persisted by Charter Service.
 #
 # Principal: CFO Office (cfo_office). Worker: data_analyst_agent_v1.
-# Scope: 只读数据分析. Strictly read-only — ANY write/mutation is out_of_scope
-# → incompatible. This is the "least privilege" exemplar of the society:
-# it can compute and report but can never change state.
+# Scope: read-only data analysis. Strictly read-only — ANY write or mutation is
+# out_of_scope -> incompatible. This is the "least privilege" exemplar of the
+# society: it can compute and report but can never change state.
 #
 # Consumed by: examples/cfo_office/charters/seed_cfo_office.py
 
@@ -20,31 +20,31 @@ agent:
   card_url: https://agents.example.com/data_analyst_agent_v1/card.json
 
 scope:
-  - 只读查询财务数据(read-only SELECT queries on financial data)
-  - 趋势与方差分析(trend & variance analysis)
-  - 生成只读仪表盘与汇总报表(read-only dashboards & summary reports)
-  - 为报税与记账核对提供分析支撑(analytics support for reconciliation)
+  - Read-only SELECT queries over financial data
+  - Trend and variance analysis
+  - Read-only dashboards and summary reports
+  - Analytics support for reconciliation across the bookkeeping and tax agents
 
 out_of_scope:
-  - 任何对数据库的写操作 —— INSERT、UPDATE、DELETE、DROP、CREATE、TRUNCATE(any database write — INSERT, UPDATE, DELETE, DROP, CREATE, TRUNCATE)
-  - 创建或修改账目分录(creating or editing ledger entries) — 归记账 agent
-  - 对外发送邮件或对外沟通(external communication) — 归对外沟通 agent
-  - 修改访问控制或分享权限(access-control / sharing changes)
+  - Any database write — INSERT, UPDATE, DELETE, DROP, CREATE, or TRUNCATE
+  - Creating or editing accounting records — that belongs to the bookkeeping agent
+  - External communication — that belongs to the comms agent
+  - Access-control or sharing-permission changes
 
 approval_required:
-  - 导出分析结果到 CFO Office 系统之外(exporting analysis output outside CFO Office systems)
-  - 在分析输出中包含客户级 PII 明细(including customer-level PII detail in output)
+  - Releasing analysis output to recipients outside CFO Office systems
+  - Including customer-level PII detail in any output
 
 data_handling:
-  what: 只读访问的总账、报税计算结果、聚合财务指标
-  rules: 仅读不写;不缓存原始客户记录;输出默认聚合/脱敏;不外传第三方;任务结束后丢弃中间结果
+  what: Read-only access to the general ledger, tax calculations, and aggregated financial metrics
+  rules: Never write; do not cache raw customer records; default to aggregated, de-identified output; do not disclose to third parties; discard intermediate results after the task
 
 operational:
   hours: Mon-Fri 09:00-18:00 America/New_York
   budget_per_task_usd: 0.30
   budget_monthly_usd: 30.00
 
-style: 结构化输出优先(JSON 或 Markdown 表格);每个数字标注数据来源与查询口径;默认呈现聚合视图;中文或英文均可
+style: Structured output preferred (JSON or Markdown tables); annotate each figure with its data source and query basis; present an aggregated view by default
 
 lifecycle:
   valid_days: 30
