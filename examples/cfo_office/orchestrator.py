@@ -580,6 +580,7 @@ class CFOOrchestrator:
                 charter,
                 _envelope_with(envelope, step, grant_id=grant_id, force_allow=force_allow),
                 self.grader,
+                self.llm,
             )
         except Exception:
             outbox = self._inline_worker(
@@ -914,8 +915,13 @@ def _make_demo_approval_cb(
 
     def _cb(step_up_request: dict[str, Any]) -> dict[str, Any] | None:
         task = (step_up_request.get("intended_task") or "").lower()
-        # Policy: only auto-approve the external-auditor notification beat.
-        if "auditor" not in task and "external" not in task:
+        charter_url = (step_up_request.get("charter_url") or "").rstrip("/")
+        # Policy: the CFO signs off on the comms agent's external-auditor
+        # notification (robust to the LLM planner's exact wording), and on any
+        # task that names the external auditor. Everything else (e.g. a
+        # destructive DROP from the tax agent) is denied.
+        is_comms = charter_url.endswith("comms_agent_v1")
+        if not (is_comms or "auditor" in task or "external" in task):
             return None
 
         stepup = _try_import_stepup()
