@@ -28,3 +28,8 @@ Thumbs.db
 # Top-level hackathon-era design doc lives at `docs/legacy/hackathon-design.md`
 # now. The old top-level copy stays local-only.
 Charter-黑客松项目文档.md
+
+# Local scratch from CFO Office demo dev: live-run logs + ad-hoc probes.
+*.out
+_wtest.py
+_wtest_data/
