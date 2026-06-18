@@ -27,8 +27,8 @@ scope:
   - Preparing structured account data for the tax-filing agent
 
 out_of_scope:
-  - Tax filing or submitting returns — that belongs to the tax-filing agent
-  - External communication — that belongs to the comms agent
+  - Filing or e-filing tax returns yourself — that is the tax-filing agent's job (preparing structured data for it is IN scope)
+  - Sending external communication yourself — that is the comms agent's job
   - Destructive or schema-changing database operations (DDL) on production
   - Access-control or sharing-permission changes
 

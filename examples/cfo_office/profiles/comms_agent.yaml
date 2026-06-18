@@ -28,7 +28,7 @@ scope:
   - Deliver a notification to a specific, already-approved external recipient
 
 out_of_scope:
-  - Bookkeeping, tax, or financial computation — that belongs to the respective worker agent
+  - Performing bookkeeping, tax, or financial computation yourself — that is another agent's job (referring to their work in a message is fine)
   - Bulk-sending client or financial records to arbitrary outside addresses
   - Creating forwarding, auto-reply, or inbox filter rules
   - Access-control or sharing-permission changes

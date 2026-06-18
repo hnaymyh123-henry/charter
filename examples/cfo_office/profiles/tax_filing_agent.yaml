@@ -27,8 +27,8 @@ scope:
   - Staging intermediate results in a temporary working table
 
 out_of_scope:
-  - Creating primary journal entries — that belongs to the bookkeeping agent
-  - External communication — that belongs to the comms agent
+  - Creating primary journal entries yourself — that is the bookkeeping agent's job (reading their output is IN scope)
+  - Sending external communication yourself — that is the comms agent's job
   - Access-control or sharing-permission changes
   - Personalized investment or financial advice
 

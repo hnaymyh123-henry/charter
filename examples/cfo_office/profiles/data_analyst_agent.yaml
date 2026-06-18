@@ -27,8 +27,8 @@ scope:
 
 out_of_scope:
   - Any database write — INSERT, UPDATE, DELETE, DROP, CREATE, or TRUNCATE
-  - Creating or editing accounting records — that belongs to the bookkeeping agent
-  - External communication — that belongs to the comms agent
+  - Creating or editing accounting records yourself — that is the bookkeeping agent's job (reading them is IN scope)
+  - Sending external communication yourself — that is the comms agent's job
   - Access-control or sharing-permission changes
 
 approval_required:

@@ -921,13 +921,16 @@ def _make_demo_approval_cb(
 
     def _cb(step_up_request: dict[str, Any]) -> dict[str, Any] | None:
         task = (step_up_request.get("intended_task") or "").lower()
-        charter_url = (step_up_request.get("charter_url") or "").rstrip("/")
-        # Policy: the CFO signs off on the comms agent's external-auditor
-        # notification (robust to the LLM planner's exact wording), and on any
-        # task that names the external auditor. Everything else (e.g. a
-        # destructive DROP from the tax agent) is denied.
-        is_comms = charter_url.endswith("comms_agent_v1")
-        if not (is_comms or "auditor" in task or "external" in task):
+        charter_url = step_up_request.get("charter_url", "")
+
+        # Policy: the CFO HOLDS genuinely destructive database actions for manual
+        # review — they stay paused, demonstrating the "the DROP is caught and
+        # NOT auto-run" red-line beat — and signs a scoped, one-shot grant for
+        # every other legitimate needs_approval step (filing the return,
+        # notifying the external auditor). out_of_scope never reaches this
+        # callback: it is `incompatible`, terminal, and never grantable.
+        destructive = ("drop table", "drop ", "truncate", "delete from", "destructive")
+        if any(k in task for k in destructive):
             return None
 
         stepup = _try_import_stepup()
@@ -936,7 +939,6 @@ def _make_demo_approval_cb(
 
         # Resolve the charter the grant is scoped to (so we can canonicalize it
         # and borrow the principal's key for the same issuer identity).
-        charter_url = step_up_request.get("charter_url", "")
         charter = _charter_for_url(charters or {}, charter_url)
         if charter is None:
             return None
@@ -947,11 +949,14 @@ def _make_demo_approval_cb(
         private_key = ensure_issuer_key(principal_id)
         issuer_pk = public_key_to_string(private_key.public_key())
 
-        constraints = stepup.GrantConstraints(
-            one_shot=True,
-            allowed_recipients=["auditor@external-firm.com"],
-            ttl_seconds=600,
-        )
+        # Scope the grant to the external recipient only when the step actually
+        # sends outside; a purely internal sensitive step (e.g. filing a return)
+        # carries no recipient constraint.
+        targets_external = "auditor" in task or "external" in task
+        constraint_kwargs: dict[str, Any] = {"one_shot": True, "ttl_seconds": 600}
+        if targets_external:
+            constraint_kwargs["allowed_recipients"] = ["auditor@external-firm.com"]
+        constraints = stepup.GrantConstraints(**constraint_kwargs)
         try:
             grant = stepup.issue_grant(
                 charter=charter.model_dump(mode="json"),
@@ -960,7 +965,7 @@ def _make_demo_approval_cb(
                 relaxes_clause_ids=list(step_up_request.get("requested_clause_ids", [])),
                 private_key=private_key,
                 issuer_public_key=issuer_pk,
-                reason="CFO approved a single external-auditor notification for the Q2 filing.",
+                reason="CFO approved this sensitive Q2 step under a one-shot, scoped grant.",
                 constraints=constraints,
                 issued_by=principal_id,
             )

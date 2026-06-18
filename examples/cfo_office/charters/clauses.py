@@ -10,9 +10,6 @@ id**:
     scope[i]            -> C-00i   (type=scope            -> allow)
     out_of_scope[i]     -> C-10i   (type=out_of_scope     -> incompatible)
     approval_required[i]-> C-20i   (type=approval_required-> needs_approval)
-    data_handling.rules -> C-301   (type=data_handling    -> needs_approval)
-    operational budget  -> C-401   (type=operational_limit-> needs_approval)
-    style               -> C-501   (type=style            -> allow)
 
 The clause `text` is copied verbatim from the profile bullet, so the profile is
 the single source of truth: editing a bullet changes the gate behaviour, and the
@@ -20,6 +17,24 @@ profile's SHA-256 is committed into the Charter's provenance by the seeder.
 
 The decision mapping itself lives in `charter.constants.TYPE_TO_DECISION` — this
 module only assigns *which clause of which type* exists, never the decision.
+
+Why only three of the six clause types reach the gate
+-----------------------------------------------------
+The gate runs on EVERY delegation, so a clause type only belongs here if it is a
+genuine *per-action* decision. We project the three decision-bearing types:
+
+    scope (allow) · out_of_scope (incompatible) · approval_required (needs_approval)
+
+We deliberately do NOT project the profile's `data_handling`, `operational`
+(budget/hours), or `style` fields into gate clauses. Those are *standing
+obligations* the agent must honour continuously, not triggers to re-gate on each
+step — and because `TYPE_TO_DECISION` maps `data_handling` and
+`operational_limit` to `needs_approval`, a semantic grader (which reasonably
+judges that almost every data-touching action "relates to" the data-handling
+rule) would force EVERY routine step through principal approval, collapsing the
+society to a halt. The obligations are not lost: they remain in the profile and
+are committed (SHA-256) into the Charter's `provenance.source_commitments`, so
+they are auditable Principal Context — just not a per-delegation gate.
 """
 
 from __future__ import annotations
@@ -44,23 +59,8 @@ def project_profile_to_clauses(profile: Profile) -> list[Clause]:
     for i, text in enumerate(profile.approval_required, start=1):
         clauses.append(Clause(id=f"C-2{i:02d}", type="approval_required", text=text))
 
-    if profile.data_handling and profile.data_handling.rules:
-        clauses.append(
-            Clause(id="C-301", type="data_handling", text=profile.data_handling.rules)
-        )
-
-    op = profile.operational
-    if op and op.budget_per_task_usd is not None:
-        parts = [f"Per-task budget {op.budget_per_task_usd:.2f} USD"]
-        if op.budget_monthly_usd is not None:
-            parts.append(f"monthly budget {op.budget_monthly_usd:.2f} USD")
-        if op.hours and op.hours != "anytime":
-            parts.append(f"operating hours {op.hours}")
-        clauses.append(
-            Clause(id="C-401", type="operational_limit", text="; ".join(parts) + ".")
-        )
-
-    if profile.style:
-        clauses.append(Clause(id="C-501", type="style", text=profile.style))
-
+    # data_handling / operational / style are standing obligations, not
+    # per-delegation gate triggers — see the module docstring for why they are
+    # intentionally not projected here. They survive in the profile and in
+    # provenance.source_commitments (committed by the seeder).
     return clauses
