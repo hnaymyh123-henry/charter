@@ -169,6 +169,23 @@ def _resolve_default_grader() -> HitsGrader:
         return _stub_grader
 
 
+def _resolve_chat() -> Callable[[str, str], str] | None:
+    """Resolve a general chat callable for LLM decomposition + generative workers.
+
+    Only wired for the Qwen provider in the showcase (CHARTER_LLM_PROVIDER=qwen);
+    returns None otherwise, which keeps the orchestrator on its deterministic
+    plan + stub-worker path (reproducible, no LLM).
+    """
+    if os.environ.get("CHARTER_LLM_PROVIDER", "anthropic").lower() == "qwen":
+        try:
+            from charter.adapters.qwen import make_qwen_chat
+
+            return make_qwen_chat()
+        except Exception:
+            return None
+    return None
+
+
 def _stub_grader(charter: Charter, task: str) -> list[dict[str, Any]]:
     """Deterministic no-LLM grader for the reproducible demo/video path.
 
@@ -309,12 +326,14 @@ class CFOOrchestrator:
         *,
         approval_cb: ApprovalCallback | None = None,
         principal_id: str = "cfo_office",
+        llm: Callable[[str, str], str] | None = None,
     ) -> None:
         self.charters = charters
         self.grader: HitsGrader = grader or _resolve_default_grader()
         self.base_url = base_url.rstrip("/")
         self.approval_cb = approval_cb
         self.principal_id = principal_id
+        self.llm = llm  # general chat callable for LLM decomposition + generative workers
         self._stepup = _try_import_stepup()
 
         # Make delegate_task build URLs against the same base we gate against.
@@ -664,11 +683,41 @@ class CFOOrchestrator:
         return "blocked"
 
     def _as_plan(self, main_task: str | TaskPlan) -> TaskPlan:
-        if isinstance(main_task, str):
-            from .task_plan import decompose
+        if not isinstance(main_task, str):
+            return main_task
+        # Generative path: when an LLM is wired, the orchestrator PLANS the
+        # multi-agent workflow itself (task decomposition + role assignment) from
+        # the team roster. Falls back to the deterministic decompose otherwise.
+        if self.llm is not None:
+            from .task_plan import decompose_llm
 
-            return decompose(main_task)
-        return main_task
+            plan = decompose_llm(main_task, self._roster(), self.llm)
+            self._log_event(
+                "plan_llm",
+                {"title": plan.title, "steps": [(s.step_id, s.agent_id) for s in plan.steps]},
+            )
+            return plan
+        from .task_plan import decompose
+
+        return decompose(main_task)
+
+    def _roster(self) -> list[dict[str, Any]]:
+        """A compact team description for the LLM planner: each agent's role,
+        in-scope capability, and limits, derived from its signed Charter."""
+        roster: list[dict[str, Any]] = []
+        for agent_id, ch in self.charters.items():
+            scope = [c.text for c in ch.clauses if c.type == "scope"]
+            limits = [
+                f"{c.type}: {c.text}"
+                for c in ch.clauses
+                if c.type in ("out_of_scope", "approval_required", "operational_limit", "data_handling")
+            ]
+            role = ch.summary.plain_language if getattr(ch, "summary", None) else agent_id
+            roster.append(
+                {"agent_id": agent_id, "role": role,
+                 "scope": "; ".join(scope), "limits": "; ".join(limits)}
+            )
+        return roster
 
     def _log_event(self, event: str, payload: dict[str, Any]) -> None:
         entry = {
@@ -777,23 +826,32 @@ def run_demo(live_llm: bool = False) -> int:
             print(f"[run_demo] seed_cfo_office unavailable ({exc!r}); using inline demo charters")
             charters = _inline_demo_charters(base_url)
 
-        # 2) Grader. Stub unless live_llm requested.
+        # 2) Grader + planner/worker LLM. Stub/deterministic unless live_llm.
         grader: HitsGrader = _resolve_default_grader() if live_llm else _stub_grader
+        llm = _resolve_chat() if live_llm else None
 
         # 3) Principal-approval callback: a policy auto-approver that mints an
         #    AdHocGrant ONLY for the external-send step, scoped to the auditor.
         approval_cb = _make_demo_approval_cb(charters)
 
-        # 4) The canonical main task.
-        try:
-            from .task_plan import build_q2_tax_plan
+        # 4) The main task. In generative mode (an LLM planner is available) we
+        #    hand the orchestrator the free-text GOAL so it decomposes + assigns
+        #    roles itself; in deterministic mode we use the canonical fixed DAG.
+        if llm is not None:
+            main_task: Any = (
+                "Complete the Q2 tax filing, then notify the external auditor "
+                "(auditor@external-firm.com) that the filing is done."
+            )
+        else:
+            try:
+                from .task_plan import build_q2_tax_plan
 
-            main_task: Any = build_q2_tax_plan()
-        except Exception:
-            main_task = "Complete Q2 tax filing, then notify the external auditor."
+                main_task = build_q2_tax_plan()
+            except Exception:
+                main_task = "Complete Q2 tax filing, then notify the external auditor."
 
         orch = CFOOrchestrator(
-            charters, grader=grader, base_url=base_url, approval_cb=approval_cb
+            charters, grader=grader, base_url=base_url, approval_cb=approval_cb, llm=llm
         )
         orch._run_id = uuid.uuid4().hex[:8]
         result = orch.run(main_task)

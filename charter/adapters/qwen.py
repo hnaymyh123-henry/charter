@@ -219,10 +219,33 @@ def make_qwen_proposer(
     return propose
 
 
+def make_qwen_chat(
+    *,
+    model: str | None = None,
+    client: Any | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    temperature: float = 0.2,
+) -> Callable[[str, str], str]:
+    """Return a general ``(system, user) -> str`` chat callable on the same provider.
+
+    Used by the CFO Office showcase for LLM-driven task decomposition and
+    generative worker execution. Same DashScope / OpenAI-compatible plumbing as
+    :func:`make_qwen_grader`; returns the raw assistant text (no JSON parsing).
+    """
+
+    def chat(system: str, user: str) -> str:
+        cli = client if client is not None else _make_client(api_key, base_url)
+        return _chat(cli, _resolve_model(model), system, user, temperature=temperature)
+
+    return chat
+
+
 __all__ = [
     "HitsGrader",
     "DEFAULT_QWEN_MODEL",
     "DEFAULT_DASHSCOPE_BASE_URL",
     "make_qwen_grader",
     "make_qwen_proposer",
+    "make_qwen_chat",
 ]

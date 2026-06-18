@@ -11,6 +11,8 @@ hand-authored (no LLM) makes the demo deterministic for the <3-min video.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 
@@ -107,3 +109,70 @@ def decompose(main_task: str) -> TaskPlan:
             )
         ],
     )
+
+
+_DECOMPOSE_SYSTEM = """\
+You are the CFO Office orchestrator coordinating a team of specialist agents.
+Given a GOAL and the TEAM (each agent has a role, an in-scope capability, and
+limits), break the goal into an ordered list of concrete subtasks and assign
+each subtask to exactly ONE agent by capability. Add dependencies where a step
+needs an earlier step's output.
+
+Return ONLY a JSON object of this shape (no markdown fences, no prose):
+
+{
+  "steps": [
+    {"step_id": "snake_case_id", "agent_id": "<one of the team ids>",
+     "intended_task": "one concrete imperative sentence",
+     "depends_on": ["earlier_step_id"]}
+  ]
+}
+
+Rules:
+  - Use ONLY agent_ids that appear in the TEAM.
+  - 3 to 6 steps; step_ids are unique snake_case.
+  - intended_task is a single concrete instruction the assigned agent acts on.
+  - Assign by best capability fit. Do NOT worry about permissions — a separate
+    contract gate checks every delegation; your job is just a sensible plan.
+"""
+
+
+def decompose_llm(
+    main_task: str,
+    roster: list[dict],
+    chat: Callable[[str, str], str],
+) -> TaskPlan:
+    """LLM-driven decomposition: plan + role assignment from the team roster.
+
+    Calls the orchestrator's own LLM (e.g. Qwen) to turn a free-text goal into a
+    multi-agent TaskPlan. Falls back to the deterministic ``decompose`` on any
+    parse/validation failure, so a bad LLM output never hard-fails the run.
+    """
+    team = "\n".join(
+        f"- {a['agent_id']}: {a.get('role', '')}. "
+        f"in-scope: {a.get('scope', '')}; limits: {a.get('limits', '')}"
+        for a in roster
+    )
+    user = f"GOAL:\n{main_task}\n\nTEAM:\n{team}\n\nProduce the plan as JSON."
+    try:
+        from charter.propose import _strip_markdown_fences
+
+        data = json.loads(_strip_markdown_fences(chat(_DECOMPOSE_SYSTEM, user)))
+        valid = {a["agent_id"] for a in roster}
+        steps: list[TaskStep] = []
+        seen: set[str] = set()
+        for s in data.get("steps", []):
+            aid, sid, task = s.get("agent_id"), s.get("step_id"), s.get("intended_task")
+            if aid not in valid or not sid or not task or sid in seen:
+                continue
+            seen.add(sid)
+            deps = [d for d in (s.get("depends_on") or []) if isinstance(d, str)]
+            steps.append(TaskStep(step_id=sid, agent_id=aid, intended_task=task, depends_on=deps))
+        # prune dangling deps (references to dropped steps) so they don't over-skip
+        for st in steps:
+            st.depends_on = [d for d in st.depends_on if d in seen]
+        if steps:
+            return TaskPlan(title=main_task, steps=steps)
+    except Exception:
+        pass
+    return decompose(main_task)
