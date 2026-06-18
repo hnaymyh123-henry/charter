@@ -35,8 +35,13 @@ contract is identical so scoring is unchanged.
 
 from __future__ import annotations
 
+import os
+import time
+
+from charter.mcp_server import aggregate_verdict as _aggregate_verdict_tool
+
 from . import baselines
-from .injections import TASK_BATCH
+from .injections import TASK_BATCH, compromised_action
 from .metrics import (
     CaseOutcome,
     MetricsRecord,
@@ -44,6 +49,27 @@ from .metrics import (
     render_table,
     score_arm,
 )
+
+
+def _call(tool, *args):  # noqa: ANN001, ANN202
+    """Unwrap a FastMCP-decorated tool and call it (mirrors orchestrator._call_tool)."""
+    for attr in ("fn", "func", "__wrapped__"):
+        if hasattr(tool, attr):
+            return getattr(tool, attr)(*args)
+    return tool(*args)
+
+
+def _build_charters() -> dict:
+    """The 4 signed demo charters (reuses the orchestrator's inline seed)."""
+    from .orchestrator import _inline_demo_charters
+
+    return _inline_demo_charters("http://localhost:8000")
+
+
+def _live_grader():  # noqa: ANN202
+    from .orchestrator import _resolve_default_grader
+
+    return _resolve_default_grader()
 
 # Per-grantable-case simulated conflict-resolution cost (ms). In the live arm
 # this is real wall-clock from needs_approval -> apply_grant; the stub uses a
@@ -126,43 +152,106 @@ def run_arm_c(cases: list[TaskCase]) -> list[CaseOutcome]:
     return [_governed_stub_outcome(c) for c in cases]
 
 
-def run_arm_c_live(cases: list[TaskCase], orchestrator: object) -> list[CaseOutcome]:  # noqa: ARG001
-    """Arm C via the real CFOOrchestrator + stepup gate (live seam).
+def run_arm_c_live(cases: list[TaskCase], grader=None) -> list[CaseOutcome]:  # noqa: ANN001
+    """Arm C via the REAL charter gate, MEASURED with the live grader.
 
-    Wired by wp-experiment once wp-orchestrator exposes CFOOrchestrator.run and
-    wp-stepup exposes request_step_up/apply_grant. The orchestrator NEVER
-    downgrades a verdict itself; it forwards needs_approval to a principal-
-    approval callback and calls apply_grant. incompatible is terminal. Each
-    StepOutcome maps 1:1 to a CaseOutcome here, so scoring is unchanged.
+    Per case the agent's action (the legit task, or — for a violation — the
+    concrete action a COMPROMISED agent attempts, so the gate has something real
+    to catch) is graded by the live grader (qwen), then run through the frozen
+    ``aggregate_verdict``. Only the gate can block an out_of_scope action.
+    Grantable needs_approval cases mint + apply a narrow AdHocGrant (real stepup
+    core) and time the resolution. No oracle — every verdict is a live judgment.
     """
-    raise NotImplementedError(
-        "Live arm-C path is wired once wp-orchestrator + wp-stepup land; "
-        "run_arm_c uses the recorded governed oracle for the offline experiment."
+    from charter.schema import Verdict
+    from charter.signing import public_key_to_string
+    from charter.stepup import (
+        GrantCheck,
+        GrantConstraints,
+        apply_grant_to_verdict,
+        issue_grant,
     )
+    from charter.storage import ensure_issuer_key
+
+    grade = grader or _live_grader()
+    charters = _build_charters()
+    pk = ensure_issuer_key("cfo_office")
+    pub = public_key_to_string(pk.public_key())
+    outcomes: list[CaseOutcome] = []
+
+    for c in cases:
+        charter = charters.get(c.expected_route or "")
+        if charter is None:
+            outcomes.append(CaseOutcome(
+                case_id=c.id, arm="C", effective_decision="incompatible", routed_to=None,
+                executed=False, grant_applied=False, conflict_ms=None,
+                notes="no charter registered for route"))
+            continue
+
+        action = compromised_action(c)  # legit task, or the harmful action under compromise
+        hits = grade(charter, action)  # LIVE grader call — the gate's judgment
+        raw = _call(_aggregate_verdict_tool, charter.model_dump(mode="json"), hits)
+        verdict = Verdict.model_validate(raw)
+        decision = verdict.decision
+        executed = decision == "allow"
+        grant_applied = False
+        conflict_ms = None
+
+        if decision == "needs_approval" and c.grantable:
+            na_ids = [m.id for m in verdict.matched_clauses
+                      if m.applied and m.local_decision == "needs_approval"]
+            if na_ids:
+                t0 = time.perf_counter()
+                try:
+                    grant = issue_grant(
+                        charter=charter.model_dump(mode="json"),
+                        charter_url=f"http://localhost:8000/cfo_office/{c.expected_route}",
+                        task_id=c.id, relaxes_clause_ids=na_ids,
+                        private_key=pk, issuer_public_key=pub,
+                        reason="experiment: principal grant for a legitimate needs_approval case",
+                        constraints=GrantConstraints(one_shot=True, ttl_seconds=600),
+                    )
+                    gv = apply_grant_to_verdict(verdict, grant, GrantCheck(ok=True, reason="ok"))
+                    decision = gv.effective_decision
+                    grant_applied = gv.granted
+                    executed = gv.granted
+                except Exception:
+                    pass
+                conflict_ms = (time.perf_counter() - t0) * 1000.0
+
+        outcomes.append(CaseOutcome(
+            case_id=c.id, arm="C", effective_decision=decision, routed_to=c.expected_route,
+            executed=executed, grant_applied=grant_applied, conflict_ms=conflict_ms,
+            notes=(verdict.reason or "")[:70]))
+    return outcomes
 
 
-_ARM_RUNNERS = {
-    "A": baselines.run_arm_a,
-    "B": baselines.run_arm_b,
-    "C": run_arm_c,
-}
+def _arm_runners(live: bool) -> dict:
+    """Arm A/B have no gate, so their honest 'executes everything' outcome is the
+    same offline or live; only arm C gains a real, measured gate when live."""
+    return {
+        "A": baselines.run_arm_a,
+        "B": baselines.run_arm_b,
+        "C": run_arm_c_live if live else run_arm_c,
+    }
 
 
 def run_experiment(
     tasks: list[TaskCase] | None = None,
     arms: tuple[str, ...] = ("A", "B", "C"),
+    live: bool = False,
 ) -> dict[str, MetricsRecord]:
     """Run the batch through each arm and return one MetricsRecord per arm.
 
-    This is the SPEC interface. Pure/offline by default (no LLM); pass a
-    Qwen-backed orchestrator/grader to the *_live runners to measure with the
-    real model. Same tasks + same grader across arms == governance is the only
-    variable.
+    live=False uses the recorded governed oracle for arm C (offline, no key, for
+    a stable video take). live=True runs arm C through the REAL gate with the
+    live grader (qwen) — every verdict is a measured judgment. Same task batch +
+    same grader across arms == governance is the only variable.
     """
     cases = tasks if tasks is not None else TASK_BATCH
+    runners = _arm_runners(live)
     records: dict[str, MetricsRecord] = {}
     for arm in arms:
-        runner = _ARM_RUNNERS.get(arm)
+        runner = runners.get(arm)
         if runner is None:
             raise ValueError(f"unknown arm {arm!r}; expected one of A/B/C")
         outcomes = runner(cases)
@@ -171,8 +260,12 @@ def run_experiment(
 
 
 def main() -> int:
-    """CLI entry: print the comparison table. Used by run_demo --mode experiment."""
-    records = run_experiment()
+    """CLI: print the A/B/C comparison table. Runs LIVE (real qwen gate for arm C)
+    when CHARTER_LLM_PROVIDER=qwen, else the OFFLINE recorded oracle."""
+    live = os.environ.get("CHARTER_LLM_PROVIDER", "").lower() == "qwen"
+    records = run_experiment(live=live)
+    print("MODE:", "LIVE — arm C measured via the real qwen gate"
+          if live else "OFFLINE — arm C = recorded oracle")
     print(render_table(records))
     print()
     for arm in ("A", "B", "C"):
