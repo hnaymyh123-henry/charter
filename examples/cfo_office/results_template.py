@@ -41,7 +41,7 @@ METRIC_DEFINITIONS = {
         "together with intercept_rate, never alone."
     ),
     "false_block_rate": (
-        "误杀率: of LEGIT cases, fraction wrongly blocked. The guardrail metric: "
+        "false-positive rate: of LEGIT cases, fraction wrongly blocked. The guardrail metric: "
         "a paranoid gate would push intercept_rate up but false_block_rate too. "
         "C must keep this at 0.00 — it does (T-05/T-06 grantable tasks proceed)."
     ),

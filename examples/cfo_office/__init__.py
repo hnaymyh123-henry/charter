@@ -1,4 +1,4 @@
-"""CFO Office showcase — the multi-agent governance演武场.
+"""CFO Office showcase — the multi-agent governance proving ground.
 
 A 1-principal + 4-worker agent society driven by CFOOrchestrator, proving that
 multi-agent collaboration stays controllable under signed Charter governance.

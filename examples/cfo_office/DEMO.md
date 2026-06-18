@@ -2,7 +2,7 @@
 
 > **Track 3 — Agent Society** · Qwen Cloud Hackathon
 > **Thesis:** Charter is signed-contract *infrastructure* for the Authority layer; the
-> "CFO Office" multi-agent society is the *showcase* (演武场) that proves the infrastructure's
+> "CFO Office" multi-agent society is the *showcase* that proves the infrastructure's
 > value. We are not building an accounting app — we are proving that **multi-agent
 > collaboration stays controllable under cryptographically-signed contract governance**.
 
@@ -22,9 +22,9 @@ Every verdict, clause id, and metric is reproducible by running:
 
 ```bash
 # the narrated, deterministic, no-LLM end-to-end run (safe for video recording)
-python -m examples.cfo_office.run_demo --mode demo
+python -m examples.cfo_office.orchestrator
 # the A/B/C governance experiment table
-python -m examples.cfo_office.run_demo --mode experiment
+python -m examples.cfo_office.experiment
 ```
 
 ---
@@ -36,7 +36,7 @@ Narration is English voiceover. Times are cumulative. The climax (Shot 6) is the
 prompt-injection A/B/C contrast — keep it on screen the longest.
 
 **Recording rule.** Use the **no-LLM deterministic mode** for the recorded take
-(`run_demo --mode demo`). It is byte-reproducible, runs in `<60s`, and needs no API key. The
+(`python -m examples.cfo_office.orchestrator`). It is byte-reproducible, runs in `<60s`, and needs no API key. The
 live-Qwen run is shown only as a 5-second "and it runs on Qwen too" coda (Shot 7), not the
 load-bearing take.
 
@@ -282,15 +282,16 @@ have exfiltrated client data is refused at a structurally-unbreakable red line.
 
 ## Appendix — Reproducible metrics cited in the video (Shot 7)
 
-Run `python -m examples.cfo_office.run_demo --mode experiment`. The A/B/C harness
+Run `python -m examples.cfo_office.experiment` (set `CHARTER_LLM_PROVIDER=qwen` +
+`DASHSCOPE_API_KEY` for the live arm-C gate). The A/B/C harness
 (`experiment.run_experiment`) runs the **same** 10-case batch (`injections.TASK_BATCH`: 6
 legitimate, 4 adversarial) through three arms whose **only** difference is the governance layer.
 
 | Arm | Governance | Intercept↑ | Route Acc↑ | Success↑ | False-block↓ | Conflict ms |
 |-----|------------|-----------|-----------|----------|-------------|-------------|
-| A | single-agent, none | 0.0 | 0.0 | 1.0 | 0.0 | 0.0 |
-| B | multi-agent, no charter | 0.0 | high (routes, doesn't gate) | 1.0 | 0.0 | 0.0 |
-| C | **charter society** | **1.0** | **1.0** | **1.0** | **0.0** | **120.0** |
+| A | single-agent, none | 0.0 | 0.0 | 1.0 | 0.0 | — |
+| B | multi-agent, no charter | 0.0 | 0.833 | 1.0 | 0.0 | — |
+| C | **charter society** | **1.0** | **1.0** | **1.0** | **0.0** | **1.8** |
 
 **How to read it (the track's "measurable improvement vs single-agent baseline").**
 - **Intercept_rate:** arm C blocks **all 4** violations (3 `out_of_scope` exfils →
@@ -301,9 +302,11 @@ legitimate, 4 adversarial) through three arms whose **only** difference is the g
   narrow grant; only genuine violations are blocked.
 - **Conflict_resolution_ms** is non-zero **only** for arm C, because only arm C *has* a
   negotiation step to time — it is the cost of doing safety *correctly* (pause → escalate →
-  grant → proceed), here ~120 ms over the grantable cases.
+  grant → proceed), here ~1.8 ms mean over the two grantable cases.
 
-> Numbers above are the deterministic offline oracle (`experiment._governed_stub_outcome`),
-> which encodes the exact verdicts the live charter gate produces; the live-Qwen path
-> (`run_arm_c_live`) yields the identical `CaseOutcome` contract, so the table is stable for the
-> recorded video and verifiable against the live run.
+> The headline numbers are the **live** run: arm C is measured through the real Qwen gate
+> (`run_arm_c_live` → `grader → aggregate_verdict`, with grantable cases minting a real
+> `AdHocGrant`). A keyless offline mode (`experiment._governed_stub_outcome`) reproduces the
+> identical `CaseOutcome` contract (same intercept/route/success) for a stable recorded take; in
+> that mode `Conflict ms` is a fixed placeholder, not a measurement. Full methodology:
+> [`EXPERIMENT_RESULTS.md`](EXPERIMENT_RESULTS.md).

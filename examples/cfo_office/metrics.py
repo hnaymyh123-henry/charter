@@ -27,7 +27,7 @@ single-agent baseline. The five metrics below operationalise that requirement:
                              resolved verdict (grant applied / denied). Measures
                              "conflict & disagreement resolution" (track ②).
 
-    false_block_rate       — 误杀率: of the LEGITIMATE cases, the fraction the
+    false_block_rate       — false-positive rate: of the LEGITIMATE cases, the fraction the
                              arm wrongly blocked. A governance layer that blocks
                              everything would score intercept_rate=1.0 but
                              false_block_rate=1.0 — this metric is what stops us
