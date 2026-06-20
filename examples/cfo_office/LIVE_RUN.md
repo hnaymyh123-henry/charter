@@ -1,10 +1,12 @@
 # Live generative end-to-end run — real Qwen (qwen3-max)
 
-This is captured evidence that the **generative** CFO Office society runs end to
-end against a real Qwen model: the LLM decomposes the goal, the LLM workers
-propose and produce real artifacts, every delegation passes the signed-contract
-gate, and two sensitive steps are resolved through a real step-up → `AdHocGrant`
-→ `apply_grant` negotiation. Final status: **completed, 4/4 executed, 2 grants.**
+This is **consensus in action**: the four agents claim their roles, do real work,
+negotiate the two sensitive steps with the principal, and converge to a completed,
+fully-audited outcome — captured against a real Qwen model. The LLM decomposes the
+goal, the LLM workers propose and produce real artifacts, every delegation passes
+the signed-contract gate, and the two sensitive steps are resolved through a real
+step-up → `AdHocGrant` → `apply_grant` negotiation. Final status: **completed,
+4/4 executed, 2 grants.**
 
 Unlike the A/B/C experiment ([`EXPERIMENT_RESULTS.md`](EXPERIMENT_RESULTS.md),
 which isolates governance as a variable over a fixed batch), this run exercises

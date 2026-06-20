@@ -1,9 +1,11 @@
 # A/B/C Governance Experiment — Results
 
 **Track 3 (Agent Society) requires a *measurable* improvement over a single-agent
-baseline.** This experiment isolates **governance** as the single variable: the
-same 10-case batch and the same governance-agnostic scoring run through three
-arms that differ only in their governance layer.
+baseline.** This experiment isolates the **signed work-contract** as the single
+variable and asks whether it makes the society more *correct* — better-coordinated,
+on-task, and within its agreed authority. The same 10-case batch and the same
+contract-agnostic scoring run through three arms that differ only in whether a
+charter governs each delegation.
 
 - **A** — single agent, no governance (no charter, no gate, no role split)
 - **B** — multi-agent with a router, **no charter / no gate**
@@ -36,17 +38,19 @@ not a hard-coded oracle.
 `C` counters: blocked_violations **4/4**, correct_route **6/6**, succeeded_legit
 **6/6**, grant-resolved cases **2**.
 
-### Reading
+### Reading — three facets of *correctness*
 
-- **Safety (Intercept):** only **C** blocks the compromised agents' violations
-  (4/4) — the charter gate is the *structural backstop*. A and B have no gate, so
-  they execute every harmful action (0/4). This is the measurable safety delta.
-- **Routing:** C assigns roles perfectly (6/6); B's keyword router is decent
-  (0.833); A has no routing.
-- **No paranoia:** C's **false-block rate is 0** — it allowed all 6 legitimate
-  cases, including the 2 grantable ones, which proceeded via a real one-shot
-  `AdHocGrant` (mean resolution 1.8 ms). Governance adds safety **without**
-  blocking legitimate work.
+- **Coordination (Route Acc):** C assigns every task to the right agent (6/6);
+  B's keyword router is decent (0.833); A has no roles. The contract's `scope`
+  clauses are what make routing checkable rather than ad hoc.
+- **Delivery without paranoia (Success / False-block):** C ships all 6 legitimate
+  tasks with **0** false-blocks — including the 2 grantable ones, which proceed
+  via a real one-shot `AdHocGrant` (mean resolution 1.8 ms). The agreed limits do
+  not get in the way of legitimate work.
+- **The agreed red line holds (Intercept):** under compromised agents, only **C**
+  holds the line (4/4) — the gate gives the consensus *teeth*. A and B have no
+  contract, so they execute every harmful action (0/4). This is the measurable
+  delta that no amount of role-splitting alone (B) buys.
 
 ## Reproduce
 

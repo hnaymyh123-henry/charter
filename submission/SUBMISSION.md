@@ -8,18 +8,24 @@
 
 ## What it is
 
-A **governance layer (Charter)** for multi-agent LLM systems, shown through a
-**CFO Office** society of specialist agents. The agents plan and act
+The **Authority layer (Charter)** for a generative multi-agent society, shown
+through a **CFO Office** of specialist agents. The agents plan and act
 generatively — an LLM decomposes the goal and assigns roles, and LLM workers do
-the real work — while **every delegation passes a signed-contract gate** that
-keeps the society safe and on-task, even when an agent is compromised.
+the real work — and a signed, queryable **work-contract** lets them reach
+**enforceable consensus** on who-does-what: what's in scope, what needs approval,
+what's off-limits. Every delegation is checked against that contract, so the
+society's collaboration is **predictable, auditable, and convergent** — and the
+agreed limits hold even when an agent is compromised.
 
 ## The problem
 
-Generative agent societies are powerful but unsafe: you cannot assume every
-agent resists prompt injection or stays in scope. Most multi-agent demos show
-agents *collaborating*; almost none show **who is allowed to do what, under what
-continuing constraints — enforced structurally**.
+Generative agent societies can collaborate, but their **authority is unwritten**:
+who an agent acts for, and the continuing limits it must never cross, live only
+in prompts and goodwill. So you cannot *predict* the society (no agreed scope),
+cannot *audit* it (no signed record of what was authorized), and cannot *trust*
+it (an injected or buggy agent silently leaves its lane). Most multi-agent demos
+show agents *collaborating*; almost none make **who-is-allowed-to-do-what an
+explicit, signed, machine-checkable agreement**.
 
 ## The solution: Charter as the Authority layer
 
@@ -36,17 +42,28 @@ fetch_charter (signed)  ->  grader (Qwen marks clause hits)  ->  aggregate_verdi
   scoped AdHocGrant** → `apply_grant` re-gates and proceeds.
 - `incompatible` (out_of_scope) is a **hard red line** no grant can ever cross.
 
+**Two readings of one artifact.** At *write time* the contract is **consensus** —
+the principal and the society agree, in signed text, what each agent is for. At
+*read time* the same clauses are **enforcement** — the gate gives that consensus
+teeth, so it holds even against an agent that no longer wants to honor it. This
+is the missing middle: `Agent Card` (capability) and `AP2` (one authorization)
+already exist; Charter makes the **continuing authority** between them explicit
+and binding.
+
 ## Track-3 criteria, point by point
 
 1. **Task decomposition & role assignment** — the orchestrator's LLM (qwen-max)
    decomposes the goal and assigns each subtask to the best-fit agent by its
    charter scope (live).
 2. **Conflict / disagreement resolution** — when an agent's contract returns
-   `needs_approval`, the society runs a real negotiation (step-up) ending in a
-   cryptographically-signed, narrowly-scoped grant — not a hard failure, not
-   blind compliance.
+   `needs_approval`, the society **re-negotiates authority**: a step-up request
+   to the principal, answered by a cryptographically-signed, narrowly-scoped
+   grant — consensus re-reached for one action, not a hard failure, not blind
+   compliance.
 3. **Measurable improvement vs single-agent baseline** — the A/B/C experiment
-   (live, real qwen gate) isolates governance as the only variable:
+   (live, real qwen gate) isolates the contract layer as the only variable, and
+   measures *correctness*, not just safety — routing (coordination), task success
+   (delivery), and interception (the consensus's teeth):
 
    | Arm | Governance | Intercept↑ | Route Acc↑ | Success↑ | False-block↓ |
    |-----|------------|-----------|-----------|----------|-------------|
@@ -54,9 +71,10 @@ fetch_charter (signed)  ->  grader (Qwen marks clause hits)  ->  aggregate_verdi
    | B | multi-agent, no charter | 0.0 | 0.833 | 1.0 | 0.0 |
    | C | **charter society** | **1.0** | **1.0** | 1.0 | **0.0** |
 
-   Under compromised agents, **only the charter-governed arm intercepts the
-   violations (4/4)**, with perfect routing and **zero** false-blocks. A and B
-   (no gate) execute every harmful action. Full methodology:
+   The charter society routes every task correctly (6/6) and ships all six
+   legitimate tasks with **zero** false-blocks — and under compromised agents it
+   is the **only** arm that holds the agreed red line (intercepts 4/4). A and B
+   have no contract, so they execute every harmful action. Full methodology:
    [`examples/cfo_office/EXPERIMENT_RESULTS.md`](../examples/cfo_office/EXPERIMENT_RESULTS.md).
 
 ## Built on Qwen Cloud
