@@ -1,7 +1,7 @@
 # Charter × CFO Office — A Governed Agent Society
 
 **Track: Agent Society** · Qwen Cloud Global AI Hackathon
-**Repo:** https://github.com/hnaymyh123-henry/charter (branch `feat/cfo-office-hackathon`) · **License:** Apache-2.0
+**Repo:** https://github.com/hnaymyh123-henry/charter (branch `cfo-office-hackathon`) · **License:** Apache-2.0
 **Architecture diagram:** [`submission/architecture.svg`](architecture.svg)
 **Demo video:** _<YouTube/Vimeo/Youku link — TBD>_
 **Alibaba Cloud service call:** [`submission/aliyun_deploy/aliyun_proof.py`](aliyun_deploy/aliyun_proof.py) (and [`charter/adapters/qwen.py`](../charter/adapters/qwen.py))
