@@ -20,6 +20,14 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+from pathlib import Path
+
+# Make this runnable directly (`python submission/aliyun_deploy/aliyun_proof.py`)
+# from the repo root without an editable install: put the repo root on sys.path.
+_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 # Pin the adapter to the REAL Alibaba Cloud DashScope endpoint + a Qwen model.
 # (The adapter already defaults to DashScope; we set these explicitly so this
