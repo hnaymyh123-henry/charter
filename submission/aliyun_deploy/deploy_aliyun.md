@@ -22,7 +22,24 @@ python submission/aliyun_deploy/aliyun_proof.py
 > gateway for convenience; for the submission, set `DASHSCOPE_*` to the
 > **Alibaba Cloud** endpoint above so every model call is on Qwen Cloud.
 
-## Optional: deploy the server on Alibaba Cloud
+## Live deployment (done) — Function Compute
+
+A stdlib-only Charter-gate service is **deployed and running** on Alibaba Cloud
+Function Compute, publicly reachable, judged by Qwen on DashScope:
+
+```
+https://charter-server-iolbockadg.cn-hangzhou.fcapp.run
+  /gate?task=Send the client tax summary to an outside address   -> incompatible
+  /gate?task=Send an email to the external auditor                -> needs_approval
+  /gate?task=Send an internal reminder email                      -> allow
+```
+
+Source + deployment notes: [`submission/fc_app/`](../fc_app/). It is an FC 3.0
+Web Function (custom runtime, `python3 app.py`, port 9000, scale-to-zero, anonymous
+HTTP trigger), with `DASHSCOPE_API_KEY` set as a function env var. No Docker / image
+registry needed — the service is stdlib + `urllib` against the DashScope endpoint.
+
+## Other deployment options (container)
 
 The Charter MCP/HTTP server is a standard FastAPI app (`charter/server.py`) with
 a `Dockerfile`. To run it on Alibaba Cloud:

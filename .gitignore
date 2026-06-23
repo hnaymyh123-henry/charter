@@ -33,3 +33,6 @@ Charter-黑客松项目文档.md
 *.out
 _wtest.py
 _wtest_data/
+
+# FC deployment zip is regenerated from submission/fc_app/app.py.
+submission/fc_app/*.zip

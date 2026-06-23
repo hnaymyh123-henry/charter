@@ -5,6 +5,7 @@
 **Architecture diagram:** [`submission/architecture.svg`](architecture.svg)
 **Demo video:** _<YouTube/Vimeo/Youku link — TBD>_
 **Alibaba Cloud service call:** [`submission/aliyun_deploy/aliyun_proof.py`](aliyun_deploy/aliyun_proof.py) (and [`charter/adapters/qwen.py`](../charter/adapters/qwen.py))
+**Live Alibaba Cloud deployment:** https://charter-server-iolbockadg.cn-hangzhou.fcapp.run — the Charter gate running on **Function Compute**, judged by **Qwen on DashScope** ([`submission/fc_app/`](fc_app/)). Try: `…/gate?task=Send%20the%20client%20tax%20summary%20to%20an%20outside%20address` → `incompatible`.
 
 ## What it is
 
